@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Permite que apenas o próprio usuário autenticado leia, crie, altere ou exclua seu documento de perfil
+    match /usuarios/{uid} {
+      allow read, create, update, delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Bloqueia qualquer outro acesso não explicitamente permitido
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
