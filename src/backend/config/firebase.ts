@@ -6,7 +6,6 @@ import {
   getReactNativePersistence,
   initializeAuth,
 } from 'firebase/auth';
-import { Firestore, getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -30,7 +29,7 @@ export const isFirebaseConfigured = Boolean(
 if (!isFirebaseConfigured) {
   console.warn(
     '[Pesk Firebase] Variáveis de ambiente não configuradas ou com valores de exemplo. ' +
-    'Crie ou edite o arquivo .env com as credenciais do seu projeto Firebase Console.'
+      'Crie ou edite o arquivo .env com as credenciais do seu projeto Firebase Console.'
   );
 }
 
@@ -68,5 +67,4 @@ function createAuth(): Auth {
 }
 
 export const auth: Auth = createAuth();
-export const db: Firestore = getFirestore(app);
 export { firebaseConfig };

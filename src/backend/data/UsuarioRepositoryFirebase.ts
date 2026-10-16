@@ -1,13 +1,13 @@
 import {
   createUserWithEmailAndPassword,
   deleteUser,
+  updateProfile,
 } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { auth, db, isFirebaseConfigured } from '../config/firebase';
 import {
   NovoUsuario,
   UsuarioRepository,
 } from '../../core/business/ports/UsuarioRepository';
+import { auth, isFirebaseConfigured } from '../config/firebase';
 
 export class UsuarioRepositoryFirebase implements UsuarioRepository {
   async cadastrar(dados: NovoUsuario): Promise<{ id: string }> {
@@ -17,33 +17,55 @@ export class UsuarioRepositoryFirebase implements UsuarioRepository {
       );
     }
 
+    const apiUrl = process.env.EXPO_PUBLIC_PESK_API_URL?.trim().replace(
+      /\/+$/,
+      ''
+    );
+    if (!apiUrl) {
+      throw new Error(
+        'URL da API ausente. Configure EXPO_PUBLIC_PESK_API_URL no arquivo .env.'
+      );
+    }
+
     let credencial;
     try {
       // 1. Cria a conta no Firebase Authentication (a senha é gerenciada exclusivamente pelo Auth)
       credencial = await createUserWithEmailAndPassword(
         auth,
         dados.email,
-        dados.senha,
+        dados.senha
       );
     } catch (authError: any) {
       throw new Error(this.mapearErroAuth(authError));
     }
 
-    const uid = credencial.user.uid;
-
     try {
-      // 2. Salva o perfil do usuário no Cloud Firestore em usuarios/{uid}
-      // NUNCA salvamos a senha no Firestore.
-      await setDoc(doc(db, 'usuarios', uid), {
-        nome: dados.nome,
-        email: dados.email,
-        criadoEm: serverTimestamp(),
+      // O nome do token é usado para identificar o pescador em participações e rankings.
+      await updateProfile(credencial.user, { displayName: dados.nome });
+      // 2. Envia o perfil à API; a identidade vem do token, nunca do corpo da requisição.
+      const idToken = await credencial.user.getIdToken(true);
+      const response = await fetch(`${apiUrl}/api/usuarios/me`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nome: dados.nome }),
       });
 
-      return { id: uid };
-    } catch (firestoreError: any) {
+      const responseBody = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          typeof responseBody?.error === 'string'
+            ? responseBody.error
+            : 'A API não conseguiu salvar o perfil do usuário.'
+        );
+      }
+
+      return { id: responseBody.id || credencial.user.uid };
+    } catch (apiError: any) {
       // 3. Mecanismo de compensação (rollback):
-      // Se a gravação no Firestore falhar, tentamos excluir a conta recém-criada
+      // Se a API falhar, tentamos excluir a conta recém-criada
       // no Firebase Authentication para não deixar uma conta órfã no sistema.
       try {
         await deleteUser(credencial.user);
@@ -54,13 +76,15 @@ export class UsuarioRepositoryFirebase implements UsuarioRepository {
         );
       }
 
-      const mensagemErro =
-        firestoreError?.message?.includes('permission-denied') ||
-        firestoreError?.code === 'permission-denied'
-          ? 'Permissão negada no Firestore. Verifique as regras de segurança (firestore.rules) do seu projeto.'
-          : 'Não foi possível gravar os dados do seu perfil no banco. O cadastro foi revertido por segurança. Tente novamente.';
+      if (apiError instanceof TypeError) {
+        throw new Error(
+          'Não foi possível conectar à API do Pesk. Verifique se o servidor está ativo e se EXPO_PUBLIC_PESK_API_URL está correto.'
+        );
+      }
 
-      throw new Error(mensagemErro);
+      throw new Error(
+        `${apiError?.message || 'Não foi possível salvar o perfil.'} O cadastro foi revertido por segurança.`
+      );
     }
   }
 

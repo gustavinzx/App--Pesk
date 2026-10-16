@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,12 +12,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
+import { isFirebaseConfigured } from '../../backend/config/firebase';
 import {
   CadastrarUsuarioService,
   ErroValidacao,
 } from '../../core/business/CadastrarUsuarioService';
-import { isFirebaseConfigured } from '../../backend/config/firebase';
 import { makeCadastrarUsuarioService } from '../factories/makeCadastrarUsuarioService';
 
 interface CadastroScreenProps {
@@ -78,7 +78,9 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
       } else if (erro instanceof Error) {
         setMensagemErro(erro.message);
       } else {
-        setMensagemErro('Não foi possível realizar o cadastro. Tente novamente.');
+        setMensagemErro(
+          'Não foi possível realizar o cadastro. Tente novamente.'
+        );
       }
     } finally {
       setCarregando(false);
@@ -112,7 +114,8 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
               </View>
             </View>
             <Text style={styles.tagline}>
-              Competições, registros de capturas e estatísticas de pesca entre amigos.
+              Competições, registros de capturas e estatísticas de pesca entre
+              amigos.
             </Text>
           </View>
 
@@ -121,9 +124,13 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
             <View style={styles.configAlert}>
               <View style={styles.configAlertDot} />
               <View style={styles.configAlertContent}>
-                <Text style={styles.configAlertTitle}>Ambiente de Demonstração</Text>
+                <Text style={styles.configAlertTitle}>
+                  Ambiente de Demonstração
+                </Text>
                 <Text style={styles.configAlertText}>
-                  As variáveis do Firebase não foram encontradas no arquivo .env. Para conectar ao seu banco real, preencha o arquivo .env com base em .env.example.
+                  As variáveis do Firebase não foram encontradas no arquivo
+                  .env. Para conectar ao seu banco real, preencha o arquivo .env
+                  com base em .env.example.
                 </Text>
               </View>
             </View>
@@ -137,17 +144,22 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
               </View>
               <Text style={styles.sucessoTitle}>Pescador Cadastrado!</Text>
               <Text style={styles.sucessoSubtitle}>
-                Sua conta foi criada no Firebase Authentication e seu perfil foi registrado no Cloud Firestore com sucesso.
+                Sua conta foi criada no Firebase Authentication e seu perfil foi
+                registrado com sucesso pela API do Pesk.
               </Text>
 
               <View style={styles.sucessoDetails}>
                 <View style={styles.sucessoDetailRow}>
                   <Text style={styles.sucessoDetailLabel}>Nome:</Text>
-                  <Text style={styles.sucessoDetailValue}>{sucessoInfo.nome}</Text>
+                  <Text style={styles.sucessoDetailValue}>
+                    {sucessoInfo.nome}
+                  </Text>
                 </View>
                 <View style={styles.sucessoDetailRow}>
                   <Text style={styles.sucessoDetailLabel}>E-mail:</Text>
-                  <Text style={styles.sucessoDetailValue}>{sucessoInfo.email}</Text>
+                  <Text style={styles.sucessoDetailValue}>
+                    {sucessoInfo.email}
+                  </Text>
                 </View>
                 <View style={styles.sucessoDetailRow}>
                   <Text style={styles.sucessoDetailLabel}>UID:</Text>
@@ -163,7 +175,9 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
                 onPress={handleNovoCadastro}
                 activeOpacity={0.8}
               >
-                <Text style={styles.buttonNovoCadastroText}>CADASTRAR OUTRO USUÁRIO</Text>
+                <Text style={styles.buttonNovoCadastroText}>
+                  CADASTRAR OUTRO USUÁRIO
+                </Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -289,7 +303,10 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
               {/* Botão de Cadastro */}
               <TouchableOpacity
                 accessibilityRole="button"
-                style={[styles.buttonSubmit, carregando && styles.buttonDisabled]}
+                style={[
+                  styles.buttonSubmit,
+                  carregando && styles.buttonDisabled,
+                ]}
                 onPress={handleCadastrar}
                 disabled={carregando}
                 activeOpacity={0.85}
@@ -297,7 +314,9 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
                 {carregando ? (
                   <View style={styles.buttonLoadingRow}>
                     <ActivityIndicator size="small" color="#071311" />
-                    <Text style={styles.buttonSubmitText}>CRIANDO CONTA...</Text>
+                    <Text style={styles.buttonSubmitText}>
+                      CRIANDO CONTA...
+                    </Text>
                   </View>
                 ) : (
                   <Text style={styles.buttonSubmitText}>CRIAR CONTA PESK</Text>
@@ -305,7 +324,9 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
               </TouchableOpacity>
 
               <Text style={styles.footerNotice}>
-                Ao se cadastrar, seu perfil será protegido pelas regras de segurança do Firebase e visível exclusivamente por você.
+                Ao se cadastrar, sua identidade será validada pelo Firebase
+                Authentication e seu perfil salvo com segurança pela API do
+                Pesk.
               </Text>
             </View>
           )}

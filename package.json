@@ -22,7 +22,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test": "jest"
+    "test": "jest",
+    "dev:backend": "npm --prefix src/backend run dev",
+    "test:backend": "npm --prefix src/backend test",
+    "typecheck:backend": "npm --prefix src/backend run typecheck",
+    "build:backend": "npm --prefix src/backend run build"
   },
   "jest": {
     "preset": "jest-expo",
@@ -30,7 +34,7 @@
       "**/__tests__/**/*.test.ts"
     ],
     "modulePathIgnorePatterns": [
-      "<rootDir>/Pesk/"
+      "<rootDir>/src/backend/server/dist/"
     ]
   },
   "private": true

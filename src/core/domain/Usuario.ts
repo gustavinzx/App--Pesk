@@ -3,4 +3,5 @@ export interface Usuario {
   nome: string;
   email: string;
   criadoEm: string;
+  atualizadoEm?: string;
 }

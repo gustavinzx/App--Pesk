@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "rootDir": "..",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmitOnError": true,
+    "types": ["node"]
+  },
+  "include": [
+    "server/**/*.ts",
+    "auth/**/*.ts",
+    "data/UsuarioRepositoryFirestore.ts",
+    "data/PescariaRepositoryFirestore.ts",
+    "data/FirebaseFotoStorage.ts",
+    "data/GeradoresAleatorios.ts",
+    "../core/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "server/**/*.test.ts"]
+}

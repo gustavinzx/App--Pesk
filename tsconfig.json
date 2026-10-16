@@ -5,7 +5,12 @@
     "types": ["jest"]
   },
   "exclude": [
-    "Pesk",
+    "src/backend/server",
+    "src/backend/auth",
+    "src/backend/data/PescariaRepositoryFirestore.ts",
+    "src/backend/data/UsuarioRepositoryFirestore.ts",
+    "src/backend/data/FirebaseFotoStorage.ts",
+    "src/backend/data/GeradoresAleatorios.ts",
     "node_modules"
   ]
 }
