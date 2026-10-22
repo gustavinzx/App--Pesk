@@ -1,3 +1,4 @@
+import { ProfileProvider } from '../frontend/context/ProfileContext';
 import { fonts, palette } from '../frontend/theme/brand';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
@@ -10,7 +11,7 @@ import { GroupDirectoryProvider } from '../frontend/context/GroupDirectoryContex
 function Navigation() {
   const { user, loading } = useSession();
   if (loading) return <View style={{ flex: 1, backgroundColor: palette.background, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator accessibilityLabel="Carregando sua sessão" color={palette.blue} /></View>;
-  return <GroupDirectoryProvider><AppMenuProvider>
+  return <ProfileProvider><GroupDirectoryProvider><AppMenuProvider>
     <Stack screenOptions={{ headerStyle: { backgroundColor: palette.background }, headerTintColor: palette.text, headerTitleStyle: { fontFamily: fonts.semibold, fontSize: 16 }, contentStyle: { backgroundColor: palette.background }, headerBackTitle: 'Voltar', headerLeft: () => <MenuToggle /> }}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Protected guard={!user}>
@@ -19,7 +20,9 @@ function Navigation() {
       </Stack.Protected>
       <Stack.Protected guard={Boolean(user)}>
         <Stack.Screen name="competicoes" options={{ headerShown: false }} />
-        <Stack.Screen name="especies" options={{ title: 'Espécies de peixes' }} />
+        <Stack.Screen name="perfil" options={{ title: 'Editar perfil' }} />
+        <Stack.Screen name="registrar-pesca" options={{ title: 'Registrar pesca' }} />
+        <Stack.Screen name="especies" options={{ title: 'Samburá' }} />
         <Stack.Screen name="criar-grupo" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="criar-desafio" options={{ headerShown: false }} />
         <Stack.Screen name="entrar-convite" options={{ title: 'Entrar por convite' }} />
@@ -29,7 +32,7 @@ function Navigation() {
         <Stack.Screen name="sobre" options={{ title: 'Sobre o Pesk' }} />
       </Stack.Protected>
     </Stack>
-  </AppMenuProvider></GroupDirectoryProvider>;
+  </AppMenuProvider></GroupDirectoryProvider></ProfileProvider>;
 }
 export default function RootLayout() {
   const [loaded, error] = useFonts({

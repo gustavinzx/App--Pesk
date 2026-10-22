@@ -210,6 +210,7 @@ export async function buildServer(
 
   await server.register(cors, {
     origin: options.corsOrigins?.length ? options.corsOrigins : false,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   server.decorateRequest('usuarioAutenticado', null);
 
@@ -278,17 +279,22 @@ export async function buildServer(
     }
   );
 
-  server.patch<{ Body: CreateProfileBody }>(
+  server.patch<{ Body: CreateProfileBody & { descricao?: string; fotoBase64?: string; fotoMimeType?: string } }>(
     '/api/usuarios/me',
-    { schema: { body: schemaNome }, preHandler: autenticar },
+    { schema: { body: { ...schemaNome, properties: { ...schemaNome.properties, descricao: { type: 'string', maxLength: 500 }, fotoBase64: { type: 'string', minLength: 4, maxLength: 5592408, pattern: '^[A-Za-z0-9+/]+={0,2}$' }, fotoMimeType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] } }, dependencies: { fotoBase64: ['fotoMimeType'], fotoMimeType: ['fotoBase64'] } } }, preHandler: autenticar },
     async (request, reply) => {
       const user = request.usuarioAutenticado!;
+      let uploaded: { url: string; path: string } | undefined;
       try {
+        await dependencies.gerenciarPerfil.buscar(user.uid);
+        if (request.body.fotoBase64 && request.body.fotoMimeType) uploaded = await dependencies.fotoStorage.salvar('perfis/' + user.uid + '/' + Date.now(), request.body.fotoBase64, request.body.fotoMimeType);
         return await dependencies.gerenciarPerfil.atualizar(
           user.uid,
-          request.body.nome
+          request.body.nome,
+          { ...(request.body.descricao !== undefined ? { descricao: request.body.descricao.trim() } : {}), ...(uploaded ? { fotoUrl: uploaded.url } : {}) }
         );
       } catch (error) {
+        if (uploaded) await dependencies.fotoStorage.excluir(uploaded.path).catch(() => undefined);
         return responderErro(error, reply, request);
       }
     }

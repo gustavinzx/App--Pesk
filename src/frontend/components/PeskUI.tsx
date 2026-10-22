@@ -28,6 +28,8 @@ export function Input({
   placeholder,
   keyboardType = 'default',
   secureTextEntry = false,
+  maxLength,
+  multiline = false,
 }: {
   label: string;
   value: string;
@@ -35,12 +37,16 @@ export function Input({
   placeholder?: string;
   keyboardType?: 'default' | 'decimal-pad' | 'email-address';
   secureTextEntry?: boolean;
+  maxLength?: number;
+  multiline?: boolean;
 }) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
+        maxLength={maxLength}
+        multiline={multiline}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}

@@ -1,3 +1,4 @@
+import { CATALOGO_ESPECIES } from '../../core/domain/catalogoEspecies.js';
 import {
   FieldValue,
   FieldPath,
@@ -348,10 +349,10 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
         transaction.get(especieRef),
         transaction.get(queryDia),
       ]);
-      if (!challenge.exists || !participation.exists || !species.exists) {
+      if (!challenge.exists || !participation.exists || (!species.exists && !CATALOGO_ESPECIES.some(item => item.id === registro.especieId))) {
         throw new Error('Desafio, participação ou espécie não encontrado.');
       }
-      const speciesData = species.data() ?? {};
+      const speciesData = CATALOGO_ESPECIES.find(item => item.id === registro.especieId) ?? species.data() ?? {};
       const challengeData = challenge.data() ?? {};
       if (
         !speciesData.ativa ||

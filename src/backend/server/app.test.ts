@@ -42,7 +42,7 @@ class MemoriaPerfilRepository implements PerfilUsuarioRepository {
   }
 }
 
-async function createTestServer(options: { tokenValido?: boolean } = {}) {
+async function createTestServer(options: { tokenValido?: boolean; corsOrigins?: string[] } = {}) {
   const repository = new MemoriaPerfilRepository();
   const gerenciarPerfil = new GerenciarPerfilUsuarioService(repository);
   const pescariaRepository = new MemoryPescariaRepository();
@@ -88,7 +88,7 @@ async function createTestServer(options: { tokenValido?: boolean } = {}) {
       gerenciarPescarias,
       fotoStorage,
     },
-    { logger: false }
+    { logger: false, corsOrigins: options.corsOrigins }
   );
   return {
     server,
@@ -675,4 +675,54 @@ test('chat photo uploads are removed if message persistence fails', async () => 
   await assert.rejects(() => service.enviarMensagem(group.id, 'owner', 'Pescador', { texto: '', fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' }), /message persistence failed/);
   assert.equal(deleted.length, 1);
   assert.match(deleted[0], /\/chat\//);
+});
+
+
+test('fixed catalog fish can be captured without manual species registration', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const headers = { authorization: 'Bearer owner-token' };
+  try {
+    const club = (await server.inject({ method: 'POST', url: '/api/desafios', headers, payload: { tipo: 'clube', nome: 'Samburá teste', inicio: '2026-10-16T12:00:00.000Z', fim: null, criteriosRanking: ['maior_peixe'] } })).json();
+    const capture = await server.inject({ method: 'POST', url: '/api/desafios/' + club.id + '/registros', headers, payload: { especieId: 'catalogo-tucunare', pesoKg: 3, local: 'Lago', dataHora: '2026-10-16T12:00:00.000Z', fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' } });
+    assert.equal(capture.statusCode, 201, capture.body);
+    assert.equal(capture.json().nomeEspecie, 'Tucunaré');
+    const detail = (await server.inject({ method: 'GET', url: '/api/desafios/' + club.id, headers })).json();
+    assert.equal(detail.rankingMaiorPeixe[0].maiorPeixeKg, 3);
+  } finally { await server.close(); }
+});
+
+
+test('profile updates persist photo and description and preserve omitted fields', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const headers = { authorization: 'Bearer valid-token' };
+  try {
+    await server.inject({ method: 'POST', url: '/api/usuarios/me', headers, payload: { nome: 'Ana' } });
+    const updated = await server.inject({ method: 'PATCH', url: '/api/usuarios/me', headers, payload: { nome: 'Ana Pesca', descricao: '  Pesco no lago  ', fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' } });
+    assert.equal(updated.statusCode, 200, updated.body);
+    assert.equal(updated.json().descricao, 'Pesco no lago');
+    assert.match(updated.json().fotoUrl, /uploads\/perfis\/firebase-uid-123/);
+    await server.inject({ method: 'PATCH', url: '/api/usuarios/me', headers, payload: { nome: 'Ana' } });
+    const saved = (await server.inject({ method: 'GET', url: '/api/usuarios/me', headers })).json();
+    assert.equal(saved.descricao, 'Pesco no lago');
+    assert.equal(saved.fotoUrl, updated.json().fotoUrl);
+    const invalid = await server.inject({ method: 'PATCH', url: '/api/usuarios/me', headers, payload: { nome: 'Ana', descricao: 'x'.repeat(501) } });
+    assert.equal(invalid.statusCode, 400);
+  } finally { await server.close(); }
+});
+
+
+test('browser preflight permits profile edits and deletes from configured origins', async () => {
+  const origin = 'http://localhost:8081';
+  const { server } = await createTestServer({ corsOrigins: [origin] });
+  try {
+    for (const method of ['PATCH', 'DELETE']) {
+      const response = await server.inject({ method: 'OPTIONS', url: '/api/usuarios/me', headers: { origin, 'access-control-request-method': method, 'access-control-request-headers': 'authorization,content-type' } });
+      assert.equal(response.statusCode, 204);
+      assert.equal(response.headers['access-control-allow-origin'], origin);
+      assert.ok(String(response.headers['access-control-allow-methods']).split(',').map(value => value.trim()).includes(method));
+      assert.match(String(response.headers['access-control-allow-headers']), /authorization/);
+    }
+    const untrusted = await server.inject({ method: 'OPTIONS', url: '/api/usuarios/me', headers: { origin: 'https://unlisted.example', 'access-control-request-method': 'PATCH' } });
+    assert.equal(untrusted.headers['access-control-allow-origin'], undefined);
+  } finally { await server.close(); }
 });

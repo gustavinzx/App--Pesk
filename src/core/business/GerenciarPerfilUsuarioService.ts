@@ -65,8 +65,9 @@ export class GerenciarPerfilUsuarioService {
     return perfil;
   }
 
-  async atualizar(id: string, nome: string): Promise<Usuario> {
+  async atualizar(id: string, nome: string, extras: { descricao?: string; fotoUrl?: string } = {}): Promise<Usuario> {
     const dados: AtualizacaoPerfilUsuario = {
+      ...extras,
       nome: this.validarNome(nome),
       atualizadoEm: this.now().toISOString(),
     };

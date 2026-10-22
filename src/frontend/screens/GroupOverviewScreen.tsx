@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import Feather from '@expo/vector-icons/Feather';
 import { router } from 'expo-router';
-import { Pressable, Share, StyleSheet, View } from 'react-native';
+import { Image, Modal, Pressable, Share, StyleSheet, View } from 'react-native';
 import GroupCover from '../components/GroupCover';
 import { GroupBody, GroupRow, g } from '../components/GroupUI';
 import { Feedback } from '../components/PeskUI';
@@ -15,6 +16,7 @@ export default function GroupOverviewScreen() {
   const user = useUsuario();
   const operation = useOperation();
   const now = useClock();
+  const [photo, setPhoto] = useState<{ uri: string; label: string } | null>(null);
   if (!group) return <GroupBody>{null}</GroupBody>;
   const ranking = group.rankingMaiorPeixe ?? [];
   const leader = ranking.find(item => item.maiorPeixeKg > 0);
@@ -27,6 +29,14 @@ export default function GroupOverviewScreen() {
       await Share.share({ message: 'Entre no grupo ' + group!.nome + ' no Pesk! Código de convite: ' + group!.codigoConvite + '. Abra o app e escolha Entrar por convite.' });
     });
   }
+  const groupActions = (
+    <View style={g.card}>
+        <GroupRow icon="send" title="Convidar participantes" subtitle="Compartilhe o código com sua turma." onPress={() => void invite()} />
+        <Text selectable style={s.code}>{group.codigoConvite}</Text>
+        <View style={g.divider} />
+        <GroupRow icon="sliders" title="Informações do grupo" subtitle="Participantes, período e regras da pescaria." onPress={openInfo} />
+      </View>
+  );
   return <View style={g.safe}>
     <GroupBody>
       <Text style={g.title}>{group.nome}</Text>
@@ -41,21 +51,23 @@ export default function GroupOverviewScreen() {
       </View>
       <Feedback error={operation.error} />
       {records.length === 0 && <View style={[g.card, { alignItems: 'center' }]}><Text style={[g.section, { marginBottom: 10, textAlign: 'center' }]}>{group.donoId === user?.uid ? 'Grupo criado!' : 'Sua turma está reunida'}</Text><Text style={[g.muted, { textAlign: 'center' }]}>{active ? 'Convide os amigos e registre a primeira captura para começar a disputa.' : group.status === 'aberto' ? 'Convide sua turma enquanto a pescaria não começa. O maior peixe leva a melhor.' : 'Acompanhe os resultados desta pescaria na aba Ranking.'}</Text></View>}
-      <View style={g.card}>
-        <GroupRow icon="send" title="Convidar participantes" subtitle="Compartilhe o código com sua turma." onPress={() => void invite()} />
-        <Text selectable style={s.code}>{group.codigoConvite}</Text>
-        <View style={g.divider} />
-        <GroupRow icon="sliders" title="Informações do grupo" subtitle="Participantes, período e regras da pescaria." onPress={openInfo} />
-      </View>
+      {group.participantes.length < 2 && groupActions}
       {group.descricao ? <View style={g.card}><Text style={g.section}>Sobre a pescaria</Text><Text style={g.muted}>{group.descricao}</Text></View> : null}
-      {records.length > 0 && <View style={g.card}><Text style={g.section}>Últimas capturas</Text>{[...records].filter(item => item.status === 'valido').sort((a, b) => b.dataHora.localeCompare(a.dataHora)).slice(0, 5).map(item => <View key={item.id} style={s.capture}><Feather name="anchor" size={20} color={palette.blue} /><View style={{ flex: 1 }}><Text style={g.rowTitle}>{item.nomeEspecie} · {item.pesoKg.toFixed(2)} kg</Text><Text style={g.muted}>{group.participantes.find(member => member.pescadorId === item.pescadorId)?.nomePescador ?? 'Pescador'} · {item.local}</Text></View></View>)}</View>}
+      {records.length > 0 && <View style={g.card}><Text style={g.section}>Últimas capturas</Text>{[...records].filter(item => item.status === 'valido').sort((a, b) => b.dataHora.localeCompare(a.dataHora)).slice(0, 5).map(item => <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={'Ver foto de ' + item.nomeEspecie} onPress={() => setPhoto({ uri: item.fotoUrl, label: item.nomeEspecie + ' · ' + item.pesoKg.toFixed(2) + ' kg' })} style={s.capture}><Image source={{ uri: item.fotoUrl }} style={s.thumbnail} /><View style={{ position: 'absolute', left: 35, bottom: 12 }}><Feather name="maximize-2" size={13} color={palette.blue} /></View><View style={{ flex: 1 }}><Text style={g.rowTitle}>{item.nomeEspecie} · {item.pesoKg.toFixed(2)} kg</Text><Text style={g.muted}>{group.participantes.find(member => member.pescadorId === item.pescadorId)?.nomePescador ?? 'Pescador'} · {item.local}</Text></View></Pressable>)}</View>}
       {!active && <Text style={g.muted}>{group.status === 'aberto' ? 'O registro de capturas será liberado quando o desafio começar com pelo menos dois participantes.' : 'O registro de capturas está encerrado para este grupo.'}</Text>}
+      {group.participantes.length >= 2 && groupActions}
       <View style={{ height: 76 }} />
     </GroupBody>
-    {active && <Pressable accessibilityRole="button" accessibilityLabel="Registrar captura" onPress={() => router.push({ pathname: '/desafio/[id]/captura', params: { id } })} style={s.fab}><Feather name="plus" size={30} color={palette.lime} /></Pressable>}
+    <Modal visible={Boolean(photo)} transparent animationType="fade" onRequestClose={() => setPhoto(null)}><View style={s.photoOverlay}><Pressable accessibilityRole="button" accessibilityLabel="Fechar foto da captura" onPress={() => setPhoto(null)} style={s.closePhoto}><Feather name="x" size={28} color={palette.lime} /></Pressable>{photo ? <><Image source={{ uri: photo.uri }} accessibilityLabel={photo.label} style={s.fullPhoto} resizeMode="contain" /><Text style={s.photoLabel}>{photo.label}</Text></> : null}</View></Modal>
+    {<Pressable accessibilityRole="button" accessibilityLabel="Registrar captura" onPress={() => router.push({ pathname: '/desafio/[id]/captura', params: { id } })} style={s.fab}><Feather name="plus" size={30} color={palette.lime} /></Pressable>}
   </View>;
 }
 const s = StyleSheet.create({
+  thumbnail: { width: 58, height: 58, borderRadius: 18 },
+  photoOverlay: { flex: 1, backgroundColor: '#071C25F5', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  fullPhoto: { width: '100%', height: '70%', maxWidth: 900 },
+  photoLabel: { color: palette.lime, fontSize: 16, marginTop: 16, textAlign: 'center' },
+  closePhoto: { position: 'absolute', right: 20, top: 48, width: 48, height: 48, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
   hero: { borderRadius: radii.card, overflow: 'hidden', backgroundColor: palette.surface, marginBottom: 24 },
   scores: { flexDirection: 'row', paddingVertical: 18, paddingHorizontal: 8 },
   score: { flex: 1, alignItems: 'center', gap: 7 },

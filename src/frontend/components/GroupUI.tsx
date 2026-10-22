@@ -37,7 +37,7 @@ export function ConfirmDialog({ visible, title, description, busy, onClose, onCo
   return <Modal visible={visible} transparent animationType="fade" onRequestClose={() => { if (!busy) onClose(); }}><View style={g.overlay}><View style={g.dialog} accessibilityViewIsModal><Text style={g.section}>{title}</Text><Text style={g.muted}>{description}</Text><AuthButton title="Confirmar" onPress={onConfirm} busy={busy} /><AuthButton title="Voltar" onPress={onClose} disabled={busy} secondary /></View></View></Modal>;
 }
 export function periodLabel(group: { tipo?: string; inicio: string; fim: string | null }) {
-  const format = (value: string) => new Date(value).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
+  const format = (value: string) => new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
   return group.tipo === 'clube' ? 'Clube contínuo · Sem data final' : format(group.inicio) + ' — ' + (group.fim ? format(group.fim) : 'Sem data final');
 }
 export const g = StyleSheet.create({

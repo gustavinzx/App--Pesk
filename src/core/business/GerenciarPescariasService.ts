@@ -1,3 +1,4 @@
+import { CATALOGO_ESPECIES } from '../domain/catalogoEspecies.js';
 import type {
   CriterioRanking,
   Desafio,
@@ -649,7 +650,7 @@ export class GerenciarPescariasService {
   }
 
   private async obterEspecieAtiva(id: string): Promise<Especie> {
-    const especie = await this.repository.buscarEspecie(id);
+    const especie = CATALOGO_ESPECIES.find(item => item.id === id) ?? await this.repository.buscarEspecie(id);
     if (!especie) throw new ErroPescaria('Espécie não encontrada.', 404);
     if (!especie.ativa) throw new ErroPescaria('A espécie está inativa.', 409);
     return especie;

@@ -1,3 +1,4 @@
+import { useProfile } from '../context/ProfileContext';
 import BrandLogo from './BrandLogo';
 import { Text } from './Typography';
 import { palette, radii } from '../theme/brand';
@@ -5,7 +6,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { router, usePathname, type Href } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { createContext, type ReactNode, useContext, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useGroupDirectory } from '../context/GroupDirectoryContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../../backend/config/firebase';
@@ -26,7 +27,7 @@ export function MenuToggle() {
 
 type Item = { icon: React.ComponentProps<typeof Feather>['name']; title: string; href: Href };
 const groups: Item[][] = [
-  [{ icon: 'home', title: 'Início', href: '/' }, { icon: 'compass', title: 'Espécies de peixes', href: '/especies' }],
+  [{ icon: 'plus-circle', title: 'Registrar pesca', href: '/registrar-pesca' }, { icon: 'home', title: 'Início', href: '/' }, { icon: 'compass', title: 'Samburá', href: '/especies' }],
   [{ icon: 'plus-circle', title: 'Criar grupo', href: '/criar-grupo' }, { icon: 'users', title: 'Entrar por convite', href: '/entrar-convite' }, { icon: 'flag', title: 'Desafios concluídos', href: '/desafios-concluidos' }],
   [{ icon: 'help-circle', title: 'Ajuda', href: '/ajuda' }, { icon: 'info', title: 'Sobre o Pesk', href: '/sobre' }],
 ];
@@ -37,8 +38,14 @@ export function AppMenuProvider({ children }: { children: ReactNode }) {
   const directory = useGroupDirectory();
   const path = usePathname();
   const operation = useOperation();
-  const name = user?.displayName || user?.email?.split('@')[0] || 'Pescador';
-  function navigate(href: Href) { setVisible(false); router.replace(href); }
+  const { profile } = useProfile();
+  const photo = profile?.fotoUrl || user?.photoURL;
+  const name = profile?.nome || user?.displayName || user?.email?.split('@')[0] || 'Pescador';
+  function navigate(href: Href) {
+    setVisible(false);
+    if (href === '/registrar-pesca') router.push({ pathname: '/registrar-pesca', params: { returnTo: path === '/registrar-pesca' ? '/' : path } });
+    else router.replace(href);
+  }
   async function logout() {
     const ok = await operation.run(() => signOut(auth));
     if (ok) { setVisible(false); router.replace('/'); }
@@ -52,16 +59,15 @@ export function AppMenuProvider({ children }: { children: ReactNode }) {
         <SafeAreaView style={s.drawer} accessibilityViewIsModal>
           <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
             <View style={s.profile}>
-              {user?.photoURL ? <Image source={{ uri: user.photoURL }} style={s.avatar} /> : <View style={s.avatar}><Text style={s.initial}>{name.charAt(0).toUpperCase()}</Text></View>}
+              {photo ? <Image source={{ uri: photo }} style={s.avatar} /> : <View style={s.avatar}><Text style={s.initial}>{name.charAt(0).toUpperCase()}</Text></View>}
               <View style={{ flex: 1 }}><Text style={s.name}>{name}</Text><Text numberOfLines={2} style={s.email}>{user?.email || 'Bem-vindo ao Pesk'}</Text></View>
               <Pressable accessibilityRole="button" accessibilityLabel="Fechar menu" onPress={() => setVisible(false)} style={s.toggle}><Feather name="x" size={23} color={palette.text} /></Pressable>
             </View>
             <View style={s.group}>
-              {directory.loading && <ActivityIndicator accessibilityLabel="Carregando grupos" color={palette.blue} style={{ marginVertical: 10 }} />}
               {directory.groups.filter(item => item.status !== 'cancelado').map(item => {
                 const selected = path === '/desafio/' + item.id || path.startsWith('/desafio/' + item.id + '/');
                 return <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={'Abrir grupo ' + item.nome} accessibilityState={{ selected }} onPress={() => navigate({ pathname: '/desafio/[id]', params: { id: item.id } })} style={({ pressed }) => [s.row, selected && s.active, pressed && { opacity: 0.6 }]}>
-                  {item.capaUrl ? <Image source={{ uri: item.capaUrl }} style={{ width: 34, height: 34, borderRadius: 17 }} /> : <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: palette.softBlue, alignItems: 'center', justifyContent: 'center' }}><Feather name={item.tipo === 'clube' ? 'users' : 'award'} size={18} color={palette.blue} /></View>}
+                  {item.capaUrl ? <Image source={{ uri: item.capaUrl }} style={{ width: 30, height: 30, borderRadius: 15 }} /> : <View style={{ width: 30, height: 30, borderRadius: 15, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: item.capaTema === 'lima' ? palette.lime : palette.blue }}><BrandLogo width={28} inverse={item.capaTema !== 'lima'} /></View>}
                   <View style={{ flex: 1 }}><Text numberOfLines={2} style={[s.label, selected && { color: palette.blue }]}>{item.nome}</Text><Text style={s.email}>{item.status === 'encerrado' ? 'Concluído' : item.tipo === 'clube' ? 'Clube' : 'Desafio'}</Text></View>
                 </Pressable>;
               })}

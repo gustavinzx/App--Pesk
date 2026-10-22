@@ -81,7 +81,11 @@ export interface MensagemGrupoDto {
 
 export interface PaginaMensagensDto { mensagens: MensagemGrupoDto[]; proximoCursor: string | null }
 
+export interface PerfilDto { id: string; nome: string; descricao?: string; fotoUrl?: string }
+
 export class PeskApiClient {
+  async perfil(): Promise<PerfilDto> { return this.request('/api/usuarios/me'); }
+  async salvarPerfil(dados: { nome: string; descricao: string; fotoBase64?: string; fotoMimeType?: string }): Promise<PerfilDto> { return this.request('/api/usuarios/me', { method: 'PATCH', body: JSON.stringify(dados) }); }
   async listarMensagens(id: string, antes?: string): Promise<PaginaMensagensDto> {
     return this.request(`/api/desafios/${encodeURIComponent(id)}/mensagens${antes ? '?antes=' + encodeURIComponent(antes) : ''}`);
   }

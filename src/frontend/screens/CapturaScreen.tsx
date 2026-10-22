@@ -1,23 +1,26 @@
+import { router, useLocalSearchParams, type Href } from 'expo-router';
+import { usePendingGroupRefresh } from '../hooks/usePendingGroupRefresh';
 import { Text } from '../components/Typography';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
+import SpeciesSelect from '../components/SpeciesSelect';
 import { useCallback, useState } from 'react';
 import { Image, TouchableOpacity, View } from 'react-native';
 import { ActionButton, Feedback, Input, Screen, styles } from '../components/PeskUI';
-import { ConfirmDialog } from '../components/GroupUI';
+import { ConfirmDialog, periodLabel } from '../components/GroupUI';
 import { useGroup } from '../context/GroupContext';
 import { api, useOperation, useResource, useUsuario } from '../hooks/usePesk';
 
 export default function CapturaScreen({ id }: { id: string }) {
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const usuario = useUsuario();
   const groupContext = useGroup();
-  const loader = useCallback(() => Promise.all([api.detalheDesafio(id), api.listarRegistros(id), api.listarEspecies()]), [id]);
+  const loader = useCallback(() => Promise.all([api.detalheDesafio(id), api.listarRegistros(id)]), [id]);
   const resource = useResource(loader);
   const operation = useOperation();
   const { pending: carregando, setError: setErro, setMessage: setMensagem } = operation;
   const desafioAtivo = resource.data?.[0];
+  usePendingGroupRefresh(desafioAtivo?.status === 'aberto', resource.refresh);
   const registros = resource.data?.[1] ?? [];
-  const especies = resource.data?.[2] ?? [];
   const desafioSelecionado = id;
   const [especieSelecionada, setEspecieSelecionada] = useState('');
   const [pesoCaptura, setPesoCaptura] = useState('');
@@ -28,7 +31,9 @@ export default function CapturaScreen({ id }: { id: string }) {
   const [editandoRegistro, setEditandoRegistro] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   async function executar(operacao: () => Promise<void>, sucesso: string) {
-    if (await operation.run(operacao, sucesso)) { resource.refresh(); groupContext.refresh(); }
+    const ok = await operation.run(operacao, sucesso);
+    if (ok) { resource.refresh(); groupContext.refresh(); }
+    return ok;
   }
   async function escolherFoto() {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -60,18 +65,19 @@ export default function CapturaScreen({ id }: { id: string }) {
       setErro('Selecione um desafio primeiro.');
       return;
     }
-    if (!especieSelecionada && !especies.some(item => item.ativa)) {
-      setErro('Cadastre ou selecione uma espécie ativa primeiro.');
+    if (!especieSelecionada) {
+      setErro('Selecione uma espécie da lista primeiro.');
       return;
     }
     if (!fotoBase64 && !editandoRegistro) {
       setErro('Selecione uma foto de prova antes de salvar.');
       return;
     }
-    await executar(
+    const novaCaptura = !editandoRegistro;
+    const salvo = await executar(
       async () => {
         const input = {
-          especieId: especieSelecionada || especies.find(item => item.ativa)?.id || '',
+          especieId: especieSelecionada,
           pesoKg: Number(pesoCaptura.replace(',', '.')),
           ...(comprimento.trim()
             ? { comprimentoCm: Number(comprimento.replace(',', '.')) }
@@ -95,6 +101,11 @@ export default function CapturaScreen({ id }: { id: string }) {
       },
       editandoRegistro ? 'Captura atualizada.' : 'Captura registrada.'
     );
+    if (salvo && novaCaptura) {
+      if (returnTo && /^\/(?!\/)/.test(returnTo)) router.dismissTo(returnTo as Href);
+      else if (router.canGoBack()) router.back();
+      else router.replace({ pathname: '/desafio/[id]', params: { id } });
+    }
   }
 
 
@@ -102,16 +113,14 @@ export default function CapturaScreen({ id }: { id: string }) {
   return <>
     <Screen title="Registrar captura" subtitle="Cada captura conta uma história. Registre a sua com foto e peso.">
       <Feedback error={operation.error || resource.error} message={operation.message} loading={resource.loading || carregando} />
-        {desafioAtivo ? (
+        {desafioAtivo ? <><Text style={styles.cardTitle}>{desafioAtivo.nome}</Text><Text style={styles.hint}>{periodLabel(desafioAtivo)} · {desafioAtivo.participantes.length} participantes</Text></> : null}
+        {desafioAtivo && desafioAtivo.status !== 'ativo' ? <Text style={styles.hint}>{desafioAtivo.status === 'aberto' ? 'Aguardando o horário de início informado acima. O desafio precisa de pelo menos dois participantes.' : desafioAtivo.status === 'cancelado' ? 'Este grupo foi cancelado. O registro de capturas está indisponível.' : 'O prazo deste grupo terminou.'}</Text> : null}
+        <ActionButton title="ATUALIZAR STATUS DO GRUPO" onPress={resource.refresh} secondary disabled={resource.loading} />
+        {desafioAtivo?.status === 'ativo' ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Registrar captura</Text>
             <Text style={styles.label}>Espécie da captura</Text>
-            {especies.filter(item => item.ativa).map(item => (
-              <TouchableOpacity accessibilityRole="radio" accessibilityState={{ checked: (especieSelecionada || especies.find(value => value.ativa)?.id) === item.id }} key={item.id} onPress={() => setEspecieSelecionada(item.id)} style={[styles.listItem, (especieSelecionada || especies.find(value => value.ativa)?.id) === item.id && styles.listItemSelected]}>
-                <Text style={styles.bodyText}>{item.nome}</Text>
-              </TouchableOpacity>
-            ))}
-            {!especies.some(item => item.ativa) && <ActionButton title="CADASTRAR UMA ESPÉCIE" onPress={() => router.push('/especies')} secondary />}
+            <SpeciesSelect value={especieSelecionada} onChange={setEspecieSelecionada} />
             <View style={{ height: 16 }} />
             <Input
               label="Peso (kg)"

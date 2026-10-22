@@ -13,8 +13,8 @@ const steps = [
 export default function AjudaScreen() {
   return <Screen title="Como podemos ajudar?" subtitle="Tudo o que você precisa para começar sua próxima pescaria.">
     {steps.map(([title, description]) => <View key={title} style={styles.card}><Text style={styles.cardTitle}>{title}</Text><Text style={styles.bodyText}>{description}</Text></View>)}
-    <View style={styles.card}><Text style={styles.cardTitle}>Não encontrou uma espécie?</Text><Text style={styles.bodyText}>Abra Espécies de peixes para cadastrar uma espécie e seu peso máximo de referência antes de registrar a captura.</Text></View>
-    <ActionButton title="VER ESPÉCIES" onPress={() => router.push('/especies')} secondary />
+    <View style={styles.card}><Text style={styles.cardTitle}>Como funciona o Samburá?</Text><Text style={styles.bodyText}>Selecione um dos 10 peixes ao registrar uma pesca. Suas capturas válidas desbloqueiam as espécies no Samburá, com foto e recorde de peso.</Text></View>
+    <ActionButton title="VER SAMBURÁ" onPress={() => router.push('/especies')} secondary />
     <ActionButton title="CRIAR UM GRUPO" onPress={() => router.push('/criar-grupo')} />
   </Screen>;
 }

@@ -41,7 +41,7 @@ export default function CriarGrupoScreen() {
   const operation = useOperation();
   const directory = useGroupDirectory();
   const duration = Math.round((Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) - Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) / 86400000) + 1;
-  const format = (date: Date) => date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
+  const format = (date: Date) => date.toLocaleString('pt-BR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
   async function editCover() {
     await operation.run(async () => {
@@ -58,12 +58,9 @@ export default function CriarGrupoScreen() {
   function changeDate(date: Date) {
     const next = new Date(date);
     if (dateTarget === 'start') {
-      next.setHours(9, 0, 0, 0);
-      if (next.toDateString() === new Date().toDateString()) next.setTime(Date.now() + 10 * 60_000);
       setStart(next);
       if (next >= end) setEnd(endAfter(next));
     } else {
-      next.setHours(23, 59, 59, 999);
       setEnd(next);
     }
     setDateTarget(null);
