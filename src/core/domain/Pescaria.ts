@@ -12,7 +12,11 @@ export interface Desafio {
   codigoConvite: string;
   donoId: string;
   inicio: string;
-  fim: string;
+  fim: string | null;
+  tipo?: 'desafio' | 'clube';
+  descricao?: string;
+  capaTema?: 'azul' | 'lima' | 'rio';
+  capaUrl?: string;
   status: StatusDesafio;
   criteriosRanking: CriterioRanking[];
   criadoEm: string;
@@ -60,8 +64,24 @@ export interface ItemRanking {
   pesoTotalKg: number;
 }
 
+export interface MensagemGrupo {
+  id: string;
+  desafioId: string;
+  pescadorId: string;
+  nomePescador: string;
+  texto: string;
+  fotoUrl?: string;
+  criadoEm: string;
+}
+
+export interface PaginaMensagens {
+  mensagens: MensagemGrupo[];
+  proximoCursor: string | null;
+}
+
 export interface DetalheDesafio extends Desafio {
   participantes: Participacao[];
   rankingPesoTotal: ItemRanking[];
+  rankingMaiorPeixe: (ItemRanking & { maiorPeixeKg: number })[];
   melhorPeixe: (RegistroPesca & { nomePescador: string }) | null;
 }

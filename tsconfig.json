@@ -5,6 +5,7 @@
     "types": ["jest"]
   },
   "exclude": [
+    "src/backend/**/*.test.ts",
     "src/backend/server",
     "src/backend/auth",
     "src/backend/config/firebaseAdmin.ts",

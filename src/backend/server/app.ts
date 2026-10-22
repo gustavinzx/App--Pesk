@@ -41,7 +41,12 @@ interface CreateProfileBody {
 interface DesafioBody {
   nome: string;
   inicio: string;
-  fim: string;
+  fim: string | null;
+  tipo?: 'desafio' | 'clube';
+  descricao?: string;
+  capaTema?: 'azul' | 'lima' | 'rio';
+  capaBase64?: string;
+  capaMimeType?: string;
   criteriosRanking?: CriterioRanking[];
 }
 
@@ -97,7 +102,12 @@ const schemaDesafio = {
   properties: {
     nome: { type: 'string', minLength: 1, maxLength: 80, pattern: '.*\\S.*' },
     inicio: { type: 'string', minLength: 1 },
-    fim: { type: 'string', minLength: 1 },
+    fim: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] },
+    tipo: { type: 'string', enum: ['desafio', 'clube'] },
+    descricao: { type: 'string', maxLength: 500 },
+    capaTema: { type: 'string', enum: ['azul', 'lima', 'rio'] },
+    capaBase64: { type: 'string', minLength: 1, maxLength: 5600000 },
+    capaMimeType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] },
     criteriosRanking: {
       type: 'array',
       minItems: 1,
@@ -357,6 +367,27 @@ export async function buildServer(
       } catch (error) {
         return responderErro(error, reply, request);
       }
+    }
+  );
+
+  server.get<{ Params: { desafioId: string }; Querystring: { antes?: string } }>(
+    '/api/desafios/:desafioId/mensagens',
+    { preHandler: autenticar, schema: { querystring: { type: 'object', additionalProperties: false, properties: { antes: { type: 'string', maxLength: 128, pattern: '^[a-zA-Z0-9_-]+$' } } } } },
+    async (request, reply) => {
+      try { return await dependencies.gerenciarPescarias.listarMensagens(request.params.desafioId, request.usuarioAutenticado!.uid, request.query.antes); }
+      catch (error) { return responderErro(error, reply, request); }
+    }
+  );
+
+  server.post<{ Params: { desafioId: string }; Body: { texto?: string; fotoBase64?: string; fotoMimeType?: string } }>(
+    '/api/desafios/:desafioId/mensagens',
+    { preHandler: autenticar, schema: { body: { type: 'object', additionalProperties: false, properties: { texto: { type: 'string', maxLength: 2000 }, fotoBase64: { type: 'string', minLength: 1, maxLength: 5600000 }, fotoMimeType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] } } } } },
+    async (request, reply) => {
+      try {
+        const user = request.usuarioAutenticado!;
+        const message = await dependencies.gerenciarPescarias.enviarMensagem(request.params.desafioId, user.uid, user.nome ?? user.email, request.body);
+        return reply.code(201).send(message);
+      } catch (error) { return responderErro(error, reply, request); }
     }
   );
 
