@@ -15,9 +15,10 @@
   "include": [
     "server/**/*.ts",
     "auth/**/*.ts",
+    "config/firebaseAdmin.ts",
     "data/UsuarioRepositoryFirestore.ts",
     "data/PescariaRepositoryFirestore.ts",
-    "data/FirebaseFotoStorage.ts",
+    "data/LocalFotoStorage.ts",
     "data/GeradoresAleatorios.ts",
     "../core/**/*.ts"
   ],

@@ -14,6 +14,7 @@ import {
   ErroPescaria,
   GerenciarPescariasService,
 } from '../../core/business/GerenciarPescariasService.js';
+import type { FotoStoragePort } from '../../core/business/ports/PescariaRepository.js';
 import type {
   UsuarioAutenticado,
   VerificadorToken,
@@ -30,6 +31,7 @@ export interface ApiDependencies {
   verificadorToken: VerificadorToken;
   gerenciarPerfil: GerenciarPerfilUsuarioService;
   gerenciarPescarias: GerenciarPescariasService;
+  fotoStorage: FotoStoragePort;
 }
 
 interface CreateProfileBody {
@@ -100,7 +102,10 @@ const schemaDesafio = {
       type: 'array',
       minItems: 1,
       uniqueItems: true,
-      items: { type: 'string', enum: ['peso_total', 'maior_peixe'] },
+      items: {
+        type: 'string',
+        enum: ['peso_total', 'maior_peixe', 'mais_peixes', 'menor_tempo'],
+      },
     },
   },
 } as const;
@@ -155,6 +160,18 @@ function responderErro(
   reply: FastifyReply,
   request: FastifyRequest
 ) {
+  const firestoreError = error as { code?: string | number; message?: string };
+  if (
+    firestoreError?.code === 9 ||
+    firestoreError?.code === '9' ||
+    firestoreError?.code === 'FAILED_PRECONDITION'
+  ) {
+    request.log.error({ err: error }, 'Firestore requires an index or precondition');
+    return reply.code(503).send({
+      error:
+        'O Firestore recusou a consulta por falta de índice/configuração. Confira o log do backend para ver o detalhe.',
+    });
+  }
   if (error instanceof ErroPescaria) {
     return reply.code(error.statusCode).send({ error: error.message });
   }
@@ -202,6 +219,23 @@ export async function buildServer(
   };
 
   server.get('/health', async () => ({ status: 'ok' }));
+
+  server.get<{ Params: { '*': string } }>(
+    '/uploads/*',
+    async (request, reply) => {
+      try {
+        const foto = await dependencies.fotoStorage.obter(request.params['*']);
+        if (!foto)
+          return reply.code(404).send({ error: 'Foto não encontrada.' });
+        return reply
+          .header('Cache-Control', 'public, max-age=3600')
+          .type(foto.contentType)
+          .send(Buffer.from(foto.bytes));
+      } catch (error) {
+        return responderErro(error, reply, request);
+      }
+    }
+  );
 
   server.post<{ Body: CreateProfileBody }>(
     '/api/usuarios/me',

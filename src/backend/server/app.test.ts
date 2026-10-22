@@ -46,15 +46,22 @@ async function createTestServer(options: { tokenValido?: boolean } = {}) {
   const repository = new MemoriaPerfilRepository();
   const gerenciarPerfil = new GerenciarPerfilUsuarioService(repository);
   const pescariaRepository = new MemoryPescariaRepository();
+  const fotoStorage = {
+    async salvar(path: string) {
+      return {
+        url: `http://localhost:3000/uploads/${path}.jpg`,
+        path: `${path}.jpg`,
+      };
+    },
+    async excluir() {},
+    async obter() {
+      return { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/jpeg' };
+    },
+  };
   let agora = new Date('2026-10-16T12:00:00.000Z');
   const gerenciarPescarias = new GerenciarPescariasService(
     pescariaRepository,
-    {
-      async salvar(path) {
-        return `https://photos.test/${path}`;
-      },
-      async excluir() {},
-    },
+    fotoStorage,
     (() => {
       let value = 0;
       return () => `id-${++value}`;
@@ -79,6 +86,7 @@ async function createTestServer(options: { tokenValido?: boolean } = {}) {
       },
       gerenciarPerfil,
       gerenciarPescarias,
+      fotoStorage,
     },
     { logger: false }
   );
@@ -100,6 +108,42 @@ test('health endpoint reports the API as ready', async () => {
     const response = await server.inject({ method: 'GET', url: '/health' });
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json(), { status: 'ok' });
+  } finally {
+    await server.close();
+  }
+});
+
+test('challenge API rejects Firestore display labels as request criteria', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  try {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/desafios',
+      headers: { authorization: 'Bearer owner-token' },
+      payload: {
+        nome: 'Desafio com critérios do Firestore',
+        inicio: '2026-10-23T10:00:00.000Z',
+        fim: '2026-10-24T10:00:00.000Z',
+        criteriosRanking: ['MAIS_PEIXES', 'MENOR_TEMPO'],
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+  } finally {
+    await server.close();
+  }
+});
+
+test('local uploaded photos are returned by the public photo route', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  try {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/uploads/desafios/teste/captura.jpg',
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['content-type'], 'image/jpeg');
+    assert.deepEqual([...response.rawPayload], [1, 2, 3]);
   } finally {
     await server.close();
   }
@@ -285,7 +329,7 @@ test('competition and capture CRUD follows business rules and calculates ranking
       status: string;
     }>();
     assert.equal(capture.status, 'valido');
-    assert.match(capture.fotoUrl, /^https:\/\/photos\.test\//);
+    assert.match(capture.fotoUrl, /^http:\/\/localhost:3000\/uploads\//);
 
     const detail = await server.inject({
       method: 'GET',

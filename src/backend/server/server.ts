@@ -1,47 +1,38 @@
 import dotenv from 'dotenv';
-import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { GerenciarPerfilUsuarioService } from '../../core/business/GerenciarPerfilUsuarioService.js';
 import { GerenciarPescariasService } from '../../core/business/GerenciarPescariasService.js';
 import { FirebaseTokenVerifier } from '../auth/FirebaseTokenVerifier.js';
-import { FirebaseFotoStorage } from '../data/FirebaseFotoStorage.js';
+import {
+  getFirebaseAdminApp,
+  getFirebaseAdminFirestore,
+} from '../config/firebaseAdmin.js';
 import { gerarCodigoConvite, gerarId } from '../data/GeradoresAleatorios.js';
+import { LocalFotoStorage } from '../data/LocalFotoStorage.js';
 import { PescariaRepositoryFirestore } from '../data/PescariaRepositoryFirestore.js';
 import { UsuarioRepositoryFirestore } from '../data/UsuarioRepositoryFirestore.js';
 import { buildServer } from './app.js';
 
-const backendEnvPath = resolve(process.cwd(), 'src/backend/.env');
-dotenv.config({
-  path: existsSync(backendEnvPath)
-    ? backendEnvPath
-    : resolve(process.cwd(), '.env'),
-});
+const projectRoot = existsSync(resolve(process.cwd(), 'src/backend'))
+  ? process.cwd()
+  : resolve(process.cwd(), '../..');
+const backendDirectory = resolve(projectRoot, 'src/backend');
+dotenv.config({ path: resolve(backendDirectory, '.env') });
 
-const firebaseApp =
-  getApps()[0] ??
-  initializeApp({
-    credential: applicationDefault(),
-    ...(process.env.FIREBASE_PROJECT_ID
-      ? { projectId: process.env.FIREBASE_PROJECT_ID }
-      : {}),
-    ...(process.env.FIREBASE_STORAGE_BUCKET
-      ? { storageBucket: process.env.FIREBASE_STORAGE_BUCKET }
-      : {}),
-  });
+const firebaseApp = getFirebaseAdminApp();
+const firestore = getFirebaseAdminFirestore();
 
-const perfilRepository = new UsuarioRepositoryFirestore(
-  getFirestore(firebaseApp)
-);
+const perfilRepository = new UsuarioRepositoryFirestore(firestore);
 const gerenciarPerfil = new GerenciarPerfilUsuarioService(perfilRepository);
 const verificadorToken = new FirebaseTokenVerifier(firebaseApp);
-const pescariaRepository = new PescariaRepositoryFirestore(
-  getFirestore(firebaseApp)
-);
-const fotoStorage = new FirebaseFotoStorage(
-  firebaseApp,
-  process.env.FIREBASE_STORAGE_BUCKET
+const pescariaRepository = new PescariaRepositoryFirestore(firestore);
+const apiPublica = (
+  process.env.API_PUBLIC_URL ?? `http://localhost:${process.env.PORT ?? 3000}`
+).replace(/\/$/, '');
+const fotoStorage = new LocalFotoStorage(
+  resolve(projectRoot, process.env.LOCAL_PHOTOS_DIR ?? 'local-data/fotos'),
+  `${apiPublica}/uploads`
 );
 const gerenciarPescarias = new GerenciarPescariasService(
   pescariaRepository,
@@ -59,7 +50,7 @@ const corsOrigins = (process.env.API_CORS_ORIGIN ?? '')
 
 async function iniciarServidor() {
   const server = await buildServer(
-    { verificadorToken, gerenciarPerfil, gerenciarPescarias },
+    { verificadorToken, gerenciarPerfil, gerenciarPescarias, fotoStorage },
     { corsOrigins }
   );
   try {

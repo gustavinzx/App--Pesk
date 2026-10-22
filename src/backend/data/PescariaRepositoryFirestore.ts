@@ -29,58 +29,56 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
     participacaoDono: Participacao
   ): Promise<void> {
     const desafioRef = this.firestore.collection('desafios').doc(desafio.id);
-    const codigoQuery = this.firestore
-      .collection('desafios')
-      .where('codigoConvite', '==', desafio.codigoConvite)
-      .limit(1);
+    const conviteRef = desafioRef
+      .collection('convites')
+      .doc(desafio.codigoConvite);
     await this.firestore.runTransaction(async (transaction) => {
-      const [codigoSnapshot, existente] = await Promise.all([
-        transaction.get(codigoQuery),
+      const [conviteExistente, desafioExistente] = await Promise.all([
+        transaction.get(conviteRef),
         transaction.get(desafioRef),
       ]);
-      if (!codigoSnapshot.empty || existente.exists) {
+      if (conviteExistente.exists || desafioExistente.exists) {
         throw new CodigoConviteDuplicadoError();
       }
       transaction.create(desafioRef, this.serializarDesafio(desafio));
+      transaction.create(conviteRef, {
+        codigo: desafio.codigoConvite,
+        criadoEm: Timestamp.fromDate(new Date(desafio.criadoEm)),
+      });
       transaction.create(
         desafioRef.collection('participacoes').doc(participacaoDono.pescadorId),
-        participacaoDono
+        {
+          pescadorId: participacaoDono.pescadorId,
+          nomePescador: participacaoDono.nomePescador,
+          dataEntrada: Timestamp.fromDate(new Date(participacaoDono.entrouEm)),
+        }
       );
     });
   }
 
   async listarDesafiosDoPescador(pescadorId: string): Promise<Desafio[]> {
-    const [organizados, participacoes] = await Promise.all([
-      this.firestore
-        .collection('desafios')
-        .where('donoId', '==', pescadorId)
-        .get(),
-      this.firestore
-        .collectionGroup('participacoes')
-        .where('pescadorId', '==', pescadorId)
-        .get(),
-    ]);
-    const ids = new Set<string>();
-    const result = new Map<string, Desafio>();
-    for (const document of organizados.docs) {
-      const desafio = this.mapearDesafio(document.id, document.data());
-      ids.add(desafio.id);
-      result.set(desafio.id, desafio);
+    // Avoid a collection-group query: the existing database stores each
+    // participation under desafios/{id}/participacoes/{pescadorId}.
+    const snapshot = await this.firestore.collection('desafios').get();
+    const result: Desafio[] = [];
+    for (const document of snapshot.docs) {
+      const data = document.data();
+      const isOwner = String(data.donoId ?? '') === pescadorId;
+      const participation = isOwner
+        ? null
+        : await document.ref
+            .collection('participacoes')
+            .doc(pescadorId)
+            .get();
+      if (
+        isOwner ||
+        (participation?.exists &&
+          !this.participacaoEncerrada(participation.data() ?? {}))
+      ) {
+        result.push(await this.mapearDesafioComConvite(document.id, data));
+      }
     }
-    for (const participation of participacoes.docs) {
-      const desafioId = participation.ref.parent.parent?.id;
-      if (!desafioId || ids.has(desafioId)) continue;
-      const snapshot = await this.firestore
-        .collection('desafios')
-        .doc(desafioId)
-        .get();
-      if (snapshot.exists)
-        result.set(
-          desafioId,
-          this.mapearDesafio(snapshot.id, snapshot.data() ?? {})
-        );
-    }
-    return [...result.values()].sort((a, b) =>
+    return result.sort((a, b) =>
       a.inicio.localeCompare(b.inicio)
     );
   }
@@ -88,18 +86,36 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
   async buscarDesafio(id: string): Promise<Desafio | null> {
     const snapshot = await this.firestore.collection('desafios').doc(id).get();
     return snapshot.exists
-      ? this.mapearDesafio(snapshot.id, snapshot.data() ?? {})
+      ? this.mapearDesafioComConvite(snapshot.id, snapshot.data() ?? {})
       : null;
   }
 
   async buscarDesafioPorCodigo(codigo: string): Promise<Desafio | null> {
-    const snapshot = await this.firestore
-      .collection('desafios')
-      .where('codigoConvite', '==', codigo)
-      .limit(1)
-      .get();
-    const doc = snapshot.docs[0];
-    return doc ? this.mapearDesafio(doc.id, doc.data()) : null;
+    const snapshot = await this.firestore.collection('desafios').get();
+    for (const document of snapshot.docs) {
+      const invitations = await document.ref.collection('convites').get();
+      const invitation = invitations.docs.find(
+        (item) =>
+          item.id.toLocaleUpperCase('pt-BR') === codigo.toLocaleUpperCase('pt-BR') ||
+          String(item.get('codigo') ?? item.get('codigoConvite') ?? '')
+            .toLocaleUpperCase('pt-BR') === codigo.toLocaleUpperCase('pt-BR')
+      );
+      if (invitation) {
+        return this.mapearDesafioComConvite(
+          document.id,
+          document.data()
+        );
+      }
+
+      // Backward compatibility with older challenge docs that held the code inline.
+      if (String(document.get('codigoConvite') ?? '') === codigo) {
+        return this.mapearDesafioComConvite(
+          document.id,
+          document.data()
+        );
+      }
+    }
+    return null;
   }
 
   async atualizarDesafio(
@@ -112,15 +128,19 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       if (!snapshot.exists) throw new Error('Desafio não encontrado.');
       const data = snapshot.data() ?? {};
       if (
-        data.status !== 'aberto' ||
-        Date.now() >= this.dateValue(data.inicio)
+        this.mapearStatus(data.status) !== 'aberto' ||
+        Date.now() >= this.dateValue(data.inicioEm ?? data.inicio)
       ) {
         throw new Error('Este desafio não pode mais ser editado.');
       }
       transaction.update(ref, {
-        ...alteracoes,
-        inicio: Timestamp.fromDate(new Date(alteracoes.inicio)),
-        fim: Timestamp.fromDate(new Date(alteracoes.fim)),
+        nome: alteracoes.nome,
+        inicioEm: Timestamp.fromDate(new Date(alteracoes.inicio)),
+        fimEm: Timestamp.fromDate(new Date(alteracoes.fim)),
+        criteriosRanking: this.serializarCriteriosRanking(
+          alteracoes.criteriosRanking,
+          data.criteriosRanking
+        ),
         atualizadoEm: FieldValue.serverTimestamp(),
       });
     });
@@ -131,7 +151,7 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
     status: Desafio['status']
   ): Promise<void> {
     await this.firestore.collection('desafios').doc(id).update({
-      status,
+      status: this.serializarStatus(status),
       atualizadoEm: FieldValue.serverTimestamp(),
     });
   }
@@ -142,9 +162,9 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       .doc(desafioId)
       .collection('participacoes')
       .get();
-    return snapshot.docs.map(
-      (doc) => ({ ...doc.data(), id: doc.id }) as Participacao
-    );
+    return snapshot.docs
+      .filter((doc) => !this.participacaoEncerrada(doc.data()))
+      .map((doc) => this.mapearParticipacao(desafioId, doc.id, doc.data()));
   }
 
   async buscarParticipacao(
@@ -157,8 +177,12 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       .collection('participacoes')
       .doc(pescadorId)
       .get();
-    return snapshot.exists
-      ? ({ ...snapshot.data(), id: snapshot.id } as Participacao)
+    return snapshot.exists && !this.participacaoEncerrada(snapshot.data() ?? {})
+      ? this.mapearParticipacao(
+          desafioId,
+          snapshot.id,
+          snapshot.data() ?? {}
+        )
       : null;
   }
 
@@ -176,13 +200,27 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       ]);
       if (
         !desafio.exists ||
-        desafio.data()?.status !== 'aberto' ||
-        Date.now() >= this.dateValue(desafio.data()?.inicio)
+        this.mapearStatus(desafio.data()?.status) !== 'aberto' ||
+        Date.now() >= this.dateValue(
+          desafio.data()?.inicioEm ?? desafio.data()?.inicio
+        )
       ) {
         throw new Error('Este desafio não está aberto para participantes.');
       }
-      if (existente.exists) throw new ParticipacaoDuplicadaError();
-      transaction.create(participanteRef, participacao);
+      const novoDocumento = {
+        pescadorId: participacao.pescadorId,
+        nomePescador: participacao.nomePescador,
+        dataEntrada: Timestamp.fromDate(new Date(participacao.entrouEm)),
+        saiuEm: null,
+      };
+      if (existente.exists) {
+        if (!this.participacaoEncerrada(existente.data() ?? {})) {
+          throw new ParticipacaoDuplicadaError();
+        }
+        transaction.update(participanteRef, novoDocumento);
+      } else {
+        transaction.create(participanteRef, novoDocumento);
+      }
     });
   }
 
@@ -198,46 +236,52 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       ]);
       if (!challenge.exists || !participation.exists) return false;
       if (
-        challenge.data()?.status !== 'aberto' ||
-        Date.now() >= this.dateValue(challenge.data()?.inicio)
+        this.mapearStatus(challenge.data()?.status) !== 'aberto' ||
+        Date.now() >= this.dateValue(
+          challenge.data()?.inicioEm ?? challenge.data()?.inicio
+        )
       ) {
         throw new Error('A saída só é permitida antes do desafio começar.');
       }
-      transaction.delete(participationRef);
+      transaction.update(participationRef, {
+        saiuEm: FieldValue.serverTimestamp(),
+      });
       return true;
     });
   }
 
   async criarEspecie(especie: Especie): Promise<void> {
     await this.firestore
-      .collection('especies')
+      .collection('espécie')
       .doc(especie.id)
       .create({
-        ...especie,
+        nome: especie.nome,
+        pesoMaximoGramas: Math.round(especie.pesoMaxReferenciaKg * 1000),
+        ativa: especie.ativa,
         criadoEm: Timestamp.fromDate(new Date(especie.criadoEm)),
       });
   }
 
   async listarEspecies(): Promise<Especie[]> {
     const snapshot = await this.firestore
-      .collection('especies')
+      .collection('espécie')
       .orderBy('nome')
       .get();
     return snapshot.docs.map((doc) => this.mapearEspecie(doc.id, doc.data()));
   }
 
   async buscarEspecie(id: string): Promise<Especie | null> {
-    const snapshot = await this.firestore.collection('especies').doc(id).get();
+    const snapshot = await this.firestore.collection('espécie').doc(id).get();
     return snapshot.exists
       ? this.mapearEspecie(snapshot.id, snapshot.data() ?? {})
       : null;
   }
 
   async atualizarEspecie(especie: Especie): Promise<void> {
-    const ref = this.firestore.collection('especies').doc(especie.id);
+    const ref = this.firestore.collection('espécie').doc(especie.id);
     await ref.update({
       nome: especie.nome,
-      pesoMaxReferenciaKg: especie.pesoMaxReferenciaKg,
+      pesoMaximoGramas: Math.round(especie.pesoMaxReferenciaKg * 1000),
       ativa: especie.ativa,
       atualizadoEm: Timestamp.fromDate(
         new Date(especie.atualizadoEm ?? new Date().toISOString())
@@ -257,7 +301,7 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       .collection('participacoes')
       .doc(registro.pescadorId);
     const especieRef = this.firestore
-      .collection('especies')
+      .collection('espécie')
       .doc(registro.especieId);
     const queryDia = this.queryRegistrosDia(
       registro.desafioId,
@@ -276,10 +320,18 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       }
       const speciesData = species.data() ?? {};
       const challengeData = challenge.data() ?? {};
-      if (!speciesData.ativa || challengeData.status !== 'ativo') {
+      if (
+        !speciesData.ativa ||
+        this.mapearStatus(challengeData.status) !== 'ativo'
+      ) {
         throw new Error('Desafio inativo ou espécie indisponível.');
       }
-      if (daily.size >= limiteDiario) throw new LimiteDiarioRegistrosError();
+      if (
+        this.contarCapturasDoDia(daily.docs, registro.pescadorId, registro.dataHora) >=
+        limiteDiario
+      ) {
+        throw new LimiteDiarioRegistrosError();
+      }
       transaction.create(ref, this.serializarRegistro(registro));
     });
   }
@@ -288,12 +340,17 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
     desafioId: string,
     pescadorId?: string
   ): Promise<RegistroPesca[]> {
-    let query: Query = this.firestore
+    const query: Query = this.firestore
       .collection('registros_pesca')
       .where('desafioId', '==', desafioId);
-    if (pescadorId) query = query.where('pescadorId', '==', pescadorId);
-    const snapshot = await query.orderBy('dataHora', 'asc').get();
-    return snapshot.docs.map((doc) => this.mapearRegistro(doc.id, doc.data()));
+    const snapshot = await query.get();
+    return snapshot.docs
+      .filter(
+        (doc) =>
+          !pescadorId || String(doc.get('pescadorId') ?? '') === pescadorId
+      )
+      .map((doc) => this.mapearRegistro(doc.id, doc.data()))
+      .sort((a, b) => a.dataHora.localeCompare(b.dataHora));
   }
 
   async buscarRegistro(id: string): Promise<RegistroPesca | null> {
@@ -323,7 +380,16 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
         alteracoes.dataHora
       );
       const daily = await transaction.get(queryDia);
-      if (daily.size >= limiteDiario) throw new LimiteDiarioRegistrosError();
+      if (
+        this.contarCapturasDoDia(
+          daily.docs,
+          String(current.pescadorId),
+          alteracoes.dataHora,
+          id
+        ) >= limiteDiario
+      ) {
+        throw new LimiteDiarioRegistrosError();
+      }
       const updateData: Record<string, unknown> = {
         ...alteracoes,
         dataHora: Timestamp.fromDate(new Date(alteracoes.dataHora)),
@@ -350,34 +416,65 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       pescadorId,
       dataHora
     ).get();
-    return snapshot.docs.filter((document) => document.id !== ignorarRegistroId)
-      .length;
+    return this.contarCapturasDoDia(
+      snapshot.docs,
+      pescadorId,
+      dataHora,
+      ignorarRegistroId
+    );
   }
 
   private queryRegistrosDia(
     desafioId: string,
-    pescadorId: string,
-    dataHora: string
+    _pescadorId: string,
+    _dataHora: string
   ): Query {
-    const date = new Date(dataHora);
-    const inicio = new Date(
-      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-    );
-    const fim = new Date(inicio.getTime() + 24 * 60 * 60 * 1000);
-    let query: Query = this.firestore
+    // Query only by the parent's challenge ID (single-field index). Participant
+    // and UTC day filtering is done in-process to avoid a composite index that
+    // this Firebase project doesn't currently have permission to create.
+    return this.firestore
       .collection('registros_pesca')
-      .where('desafioId', '==', desafioId)
-      .where('pescadorId', '==', pescadorId)
-      .where('dataHora', '>=', Timestamp.fromDate(inicio))
-      .where('dataHora', '<', Timestamp.fromDate(fim));
-    return query;
+      .where('desafioId', '==', desafioId);
+  }
+
+  private contarCapturasDoDia(
+    documents: Array<{ id: string; data: () => FirebaseFirestore.DocumentData | undefined }>,
+    pescadorId: string,
+    dataHora: string,
+    ignorarRegistroId?: string
+  ): number {
+    const date = new Date(dataHora);
+    const start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    const end = start + 24 * 60 * 60 * 1000;
+    return documents.filter((document) => {
+      if (document.id === ignorarRegistroId) return false;
+      const data = document.data() ?? {};
+      const value = data.dataHora;
+      const capturedAt = value instanceof Timestamp
+        ? value.toMillis()
+        : value instanceof Date
+          ? value.getTime()
+          : typeof value === 'string'
+            ? new Date(value).getTime()
+            : Number.NaN;
+      return (
+        String(data.pescadorId ?? '') === pescadorId &&
+        capturedAt >= start &&
+        capturedAt < end
+      );
+    }).length;
   }
 
   private serializarDesafio(desafio: NovoDesafio) {
     return {
-      ...desafio,
-      inicio: Timestamp.fromDate(new Date(desafio.inicio)),
-      fim: Timestamp.fromDate(new Date(desafio.fim)),
+      nome: desafio.nome,
+      donoId: desafio.donoId,
+      inicioEm: Timestamp.fromDate(new Date(desafio.inicio)),
+      fimEm: Timestamp.fromDate(new Date(desafio.fim)),
+      status: this.serializarStatus(desafio.status),
+      criteriosRanking: this.serializarCriteriosRanking(
+        desafio.criteriosRanking
+      ),
       criadoEm: Timestamp.fromDate(new Date(desafio.criadoEm)),
     };
   }
@@ -390,19 +487,34 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
     };
   }
 
-  private mapearDesafio(id: string, data: Record<string, unknown>): Desafio {
+  private async mapearDesafioComConvite(
+    id: string,
+    data: Record<string, unknown>
+  ): Promise<Desafio> {
+    let codigoConvite = String(data.codigoConvite ?? '');
+    if (!codigoConvite) {
+      const convites = await this.firestore
+        .collection('desafios')
+        .doc(id)
+        .collection('convites')
+        .limit(1)
+        .get();
+      const convite = convites.docs[0];
+      if (convite) {
+        codigoConvite = String(
+          convite.get('codigo') ?? convite.get('codigoConvite') ?? convite.id
+        );
+      }
+    }
     return {
       id,
       nome: String(data.nome ?? ''),
-      codigoConvite: String(data.codigoConvite ?? ''),
+      codigoConvite,
       donoId: String(data.donoId ?? ''),
-      inicio: this.iso(data.inicio),
-      fim: this.iso(data.fim),
-      status: data.status as Desafio['status'],
-      criteriosRanking: (data.criteriosRanking ?? [
-        'peso_total',
-        'maior_peixe',
-      ]) as Desafio['criteriosRanking'],
+      inicio: this.iso(data.inicioEm ?? data.inicio),
+      fim: this.iso(data.fimEm ?? data.fim),
+      status: this.mapearStatus(data.status),
+      criteriosRanking: this.mapearCriteriosRanking(data.criteriosRanking),
       criadoEm: this.iso(data.criadoEm),
     };
   }
@@ -411,13 +523,101 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
     return {
       id,
       nome: String(data.nome ?? ''),
-      pesoMaxReferenciaKg: Number(data.pesoMaxReferenciaKg ?? 0),
+      pesoMaxReferenciaKg: Number(
+        data.pesoMaxReferenciaKg ??
+          (typeof data.pesoMaximoGramas === 'number'
+            ? data.pesoMaximoGramas / 1000
+            : 0)
+      ),
       ativa: Boolean(data.ativa),
       criadoEm: this.iso(data.criadoEm),
       ...(data.atualizadoEm
         ? { atualizadoEm: this.iso(data.atualizadoEm) }
         : {}),
     };
+  }
+
+  private mapearParticipacao(
+    desafioId: string,
+    id: string,
+    data: Record<string, unknown>
+  ): Participacao {
+    const pescadorId = String(data.pescadorId ?? id);
+    return {
+      id,
+      desafioId,
+      pescadorId,
+      nomePescador: String(data.nomePescador ?? data.nome ?? pescadorId),
+      entrouEm: this.iso(
+        data.dataEntrada ?? data.entrouEm ?? data.criadoEm
+      ),
+    };
+  }
+
+  private participacaoEncerrada(data: Record<string, unknown>): boolean {
+    return (data.saiuEm !== undefined && data.saiuEm !== null) ||
+      (data.dataSaida !== undefined && data.dataSaida !== null);
+  }
+
+  private mapearStatus(value: unknown): Desafio['status'] {
+    const status = String(value ?? '').toLocaleLowerCase('pt-BR');
+    if (status === 'aberto') return 'aberto';
+    if (status === 'ativo') return 'ativo';
+    if (status === 'encerrado') return 'encerrado';
+    if (status === 'cancelado') return 'cancelado';
+    return 'aberto';
+  }
+
+  private serializarStatus(status: Desafio['status']): string {
+    return status.toLocaleUpperCase('pt-BR');
+  }
+
+  private mapearCriterio(value: string): Desafio['criteriosRanking'][number] | null {
+    const normalized = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase();
+    if (['PESO_TOTAL', 'MAIOR_PESO_TOTAL'].includes(normalized)) {
+      return 'peso_total';
+    }
+    if (['MAIS_PEIXES', 'MAIS_PESCADOS'].includes(normalized)) {
+      return 'mais_peixes';
+    }
+    if (['MENOR_TEMPO', 'INICIO_ATE_PRIMEIRO_REGISTRO_VALIDO'].includes(normalized)) {
+      return 'menor_tempo';
+    }
+    if (['MAIOR_PEIXE', 'MELHOR_PEIXE'].includes(normalized)) {
+      return 'maior_peixe';
+    }
+    return null;
+  }
+
+  private mapearCriteriosRanking(value: unknown): Desafio['criteriosRanking'] {
+    const values = Array.isArray(value) ? value.map(String) : [];
+    const criteria = new Set(values
+      .map((item) => this.mapearCriterio(item))
+      .filter(
+        (item): item is Desafio['criteriosRanking'][number] => item !== null
+      ));
+    return criteria.size ? [...criteria] : ['peso_total', 'maior_peixe'];
+  }
+
+  private serializarCriteriosRanking(
+    value: Desafio['criteriosRanking'],
+    existentes?: unknown
+  ): unknown[] {
+    const values = Array.isArray(existentes) ? [...existentes] : [];
+    const preserved = values.filter(
+      (item) => typeof item !== 'string' || this.mapearCriterio(item) === null
+    );
+    const stored: string[] = [];
+    if (value.includes('peso_total')) stored.push('PESO_TOTAL');
+    if (value.includes('mais_peixes')) stored.push('MAIS_PEIXES');
+    if (value.includes('menor_tempo')) {
+      stored.push('INICIO_ATE_PRIMEIRO_REGISTRO_VALIDO');
+    }
+    if (value.includes('maior_peixe')) stored.push('MAIOR_PEIXE');
+    return [...preserved, ...stored];
   }
 
   private mapearRegistro(

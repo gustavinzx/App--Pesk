@@ -21,9 +21,13 @@ import { makeCadastrarUsuarioService } from '../factories/makeCadastrarUsuarioSe
 
 interface CadastroScreenProps {
   service?: CadastrarUsuarioService;
+  onAbrirTestes?: () => void;
 }
 
-export default function CadastroScreen({ service }: CadastroScreenProps) {
+export default function CadastroScreen({
+  service,
+  onAbrirTestes,
+}: CadastroScreenProps) {
   // Permite injeção de dependência para testes, com fallback para factory padrão
   const cadastrarUsuarioService = service || makeCadastrarUsuarioService();
 
@@ -328,6 +332,19 @@ export default function CadastroScreen({ service }: CadastroScreenProps) {
                 Authentication e seu perfil salvo com segurança pela API do
                 Pesk.
               </Text>
+
+              {onAbrirTestes ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  style={styles.testLinkButton}
+                  onPress={onAbrirTestes}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.testLinkText}>
+                    JÁ TENHO CONTA · TESTAR COMPETIÇÕES
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
         </ScrollView>
@@ -624,5 +641,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     letterSpacing: 0.8,
+  },
+  testLinkButton: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  testLinkText: {
+    color: '#00E599',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
 });

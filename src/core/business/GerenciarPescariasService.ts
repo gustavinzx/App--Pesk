@@ -35,7 +35,12 @@ const TIPOS_FOTO_PERMITIDOS = new Set([
   'image/png',
   'image/webp',
 ]);
-const CRITERIOS_RANKING: CriterioRanking[] = ['peso_total', 'maior_peixe'];
+const CRITERIOS_RANKING: CriterioRanking[] = [
+  'peso_total',
+  'maior_peixe',
+  'mais_peixes',
+  'menor_tempo',
+];
 
 export interface DadosCriacaoDesafio {
   nome: string;
@@ -168,12 +173,37 @@ export class GerenciarPescariasService {
         );
       }
     }
-    const rankingPesoTotal = status.criteriosRanking.includes('peso_total')
+    const usaRankingPeso = status.criteriosRanking.some((criterio) =>
+      ['peso_total', 'mais_peixes', 'menor_tempo'].includes(criterio)
+    );
+    const rankingPesoTotal = usaRankingPeso
       ? [...totais.values()].sort(
-          (a, b) =>
-            b.pesoTotalKg - a.pesoTotalKg ||
-            b.quantidadePeixes - a.quantidadePeixes ||
-            a.pescadorId.localeCompare(b.pescadorId)
+          (a, b) => {
+            const compareWeight = b.pesoTotalKg - a.pesoTotalKg;
+            const compareCount = b.quantidadePeixes - a.quantidadePeixes;
+            if (
+              status.criteriosRanking.includes('menor_tempo') &&
+              compareWeight === 0 &&
+              compareCount === 0
+            ) {
+              const earliestA = registrosValidos
+                .filter((registro) => registro.pescadorId === a.pescadorId)
+                .map((registro) => registro.dataHora)
+                .sort()[0];
+              const earliestB = registrosValidos
+                .filter((registro) => registro.pescadorId === b.pescadorId)
+                .map((registro) => registro.dataHora)
+                .sort()[0];
+              if (earliestA && earliestB) {
+                return earliestA.localeCompare(earliestB);
+              }
+            }
+            return (
+              compareWeight ||
+              compareCount ||
+              a.pescadorId.localeCompare(b.pescadorId)
+            );
+          }
         )
       : [];
     const melhorRegistro = [...registrosValidos].sort(
@@ -377,12 +407,13 @@ export class GerenciarPescariasService {
     }
 
     const id = this.gerarId();
-    const fotoPath = `desafios/${desafioAtualizado.id}/registros/${id}.${foto.extension}`;
-    const fotoUrl = await this.fotoStorage.salvar(
+    let fotoPath = `desafios/${desafioAtualizado.id}/registros/${id}`;
+    const fotoSalva = await this.fotoStorage.salvar(
       fotoPath,
       foto.base64,
       foto.mimeType
     );
+    fotoPath = fotoSalva.path;
     const registro = {
       id,
       desafioId: desafioAtualizado.id,
@@ -394,7 +425,7 @@ export class GerenciarPescariasService {
       ...(comprimentoCm === undefined ? {} : { comprimentoCm }),
       local,
       dataHora: dataHora.toISOString(),
-      fotoUrl,
+      fotoUrl: fotoSalva.url,
       fotoPath,
       status: 'valido' as const,
       criadoEm: this.agora().toISOString(),
@@ -456,12 +487,14 @@ export class GerenciarPescariasService {
         throw new ErroPescaria('Envie a foto e seu tipo MIME juntos.', 400);
       }
       const foto = this.validarFoto(dados.fotoBase64, dados.fotoMimeType);
-      novoPath = `desafios/${desafio.id}/registros/${registro.id}-${this.gerarId()}.${foto.extension}`;
-      novaUrl = await this.fotoStorage.salvar(
-        novoPath,
+      const caminhoNovo = `desafios/${desafio.id}/registros/${registro.id}-${this.gerarId()}`;
+      const fotoSalva = await this.fotoStorage.salvar(
+        caminhoNovo,
         foto.base64,
         foto.mimeType
       );
+      novoPath = fotoSalva.path;
+      novaUrl = fotoSalva.url;
     }
 
     const alteracoes: AlteracaoRegistroPesca = {

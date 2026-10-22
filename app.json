@@ -4,6 +4,17 @@
     "slug": "Pesk",
     "version": "1.0.0",
     "orientation": "portrait",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permitir ao Pesk selecionar uma foto como prova da pescaria.",
+          "cameraPermission": "Permitir ao Pesk tirar uma foto como prova da pescaria.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-status-bar"
+    ],
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {

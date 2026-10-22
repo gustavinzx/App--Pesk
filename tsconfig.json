@@ -7,9 +7,10 @@
   "exclude": [
     "src/backend/server",
     "src/backend/auth",
+    "src/backend/config/firebaseAdmin.ts",
     "src/backend/data/PescariaRepositoryFirestore.ts",
     "src/backend/data/UsuarioRepositoryFirestore.ts",
-    "src/backend/data/FirebaseFotoStorage.ts",
+    "src/backend/data/LocalFotoStorage.ts",
     "src/backend/data/GeradoresAleatorios.ts",
     "node_modules"
   ]

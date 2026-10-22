@@ -1,0 +1,22 @@
+[debug] [2026-10-22T16:03:23.603Z] ----------------------------------------------------------------------
+[debug] [2026-10-22T16:03:23.604Z] Command:       /home/g_enrico/.nvm/versions/node/v24.16.0/bin/node /home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/.bin/firebase deploy --only firestore:indexes --project pesk-8d30a --force --debug
+[debug] [2026-10-22T16:03:23.604Z] CLI Version:   15.34.1
+[debug] [2026-10-22T16:03:23.604Z] Platform:      linux
+[debug] [2026-10-22T16:03:23.605Z] Node Version:  v24.16.0
+[debug] [2026-10-22T16:03:23.605Z] Detected Agent: github_copilot_vscode_agent
+[debug] [2026-10-22T16:03:23.605Z] Time:          Thu Oct 22 2026 13:03:23 GMT-0300 (Brasilia Standard Time)
+[debug] [2026-10-22T16:03:23.605Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-22T16:03:24.133Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-22T16:03:24.151Z] Error: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.
+    at GoogleAuth.getApplicationDefaultAsync (/home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/google-auth-library/build/src/auth/googleauth.js:287:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GoogleAuth._GoogleAuth_determineClient (/home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/google-auth-library/build/src/auth/googleauth.js:834:32)
+    at async GoogleAuth.getClient (/home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/google-auth-library/build/src/auth/googleauth.js:698:20)
+    at async GoogleAuth.getAccessToken (/home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/google-auth-library/build/src/auth/googleauth.js:722:24)
+    at async autoAuth (/home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/firebase-tools/lib/requireAuth.js:38:19)
+    at async requireAuth (/home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/firebase-tools/lib/requireAuth.js:100:20)
+    at async requirePermissions (/home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/firebase-tools/lib/requirePermissions.js:12:5)
+    at async /home/g_enrico/.npm/_npx/ba4f1959e38407b5/node_modules/firebase-tools/lib/command.js:285:17
+[error] 
+[error] Error: Failed to authenticate, have you run firebase login?

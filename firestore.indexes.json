@@ -1,22 +1,4 @@
 {
-  "indexes": [
-    {
-      "collectionGroup": "registros_pesca",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "desafioId", "order": "ASCENDING" },
-        { "fieldPath": "dataHora", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "registros_pesca",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "desafioId", "order": "ASCENDING" },
-        { "fieldPath": "pescadorId", "order": "ASCENDING" },
-        { "fieldPath": "dataHora", "order": "ASCENDING" }
-      ]
-    }
-  ],
+  "indexes": [],
   "fieldOverrides": []
 }

@@ -81,8 +81,19 @@ export interface PescariaRepository {
 }
 
 export interface FotoStoragePort {
-  salvar(path: string, base64: string, contentType: string): Promise<string>;
-  excluir(path: string): Promise<void>;
+  salvar(path: string, base64: string, contentType: string): Promise<FotoSalva>;
+  excluir(pathOuUrl: string): Promise<void>;
+  obter(path: string): Promise<FotoArquivo | null>;
+}
+
+export interface FotoSalva {
+  url: string;
+  path: string;
+}
+
+export interface FotoArquivo {
+  bytes: Uint8Array;
+  contentType: string;
 }
 
 export class CodigoConviteDuplicadoError extends Error {

@@ -1,6 +1,10 @@
 export type StatusDesafio = 'aberto' | 'ativo' | 'encerrado' | 'cancelado';
 export type StatusRegistroPesca = 'valido' | 'contestado' | 'anulado';
-export type CriterioRanking = 'peso_total' | 'maior_peixe';
+export type CriterioRanking =
+  | 'peso_total'
+  | 'maior_peixe'
+  | 'mais_peixes'
+  | 'menor_tempo';
 
 export interface Desafio {
   id: string;
