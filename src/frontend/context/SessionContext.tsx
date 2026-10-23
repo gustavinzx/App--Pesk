@@ -1,6 +1,6 @@
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
-import { auth } from '../../backend/config/firebase';
+import { auth } from '../config/firebase';
 
 const SessionContext = createContext<{
   user: User | null; loading: boolean; setRegistering: (value: boolean) => void;

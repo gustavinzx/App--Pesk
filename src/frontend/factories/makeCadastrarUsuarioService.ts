@@ -1,5 +1,5 @@
 import { CadastrarUsuarioService } from '../../core/business/CadastrarUsuarioService';
-import { UsuarioRepositoryFirebase } from '../../backend/data/UsuarioRepositoryFirebase';
+import { UsuarioRepositoryFirebase } from '../repositories/UsuarioRepositoryFirebase';
 
 /**
  * Composition Root / Factory para instanciar o serviço de cadastro

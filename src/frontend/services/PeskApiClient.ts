@@ -1,5 +1,5 @@
 import { getIdToken } from 'firebase/auth';
-import { auth } from '../../backend/config/firebase';
+import { auth } from '../config/firebase';
 
 const apiBaseUrl = (process.env.EXPO_PUBLIC_PESK_API_URL ?? '')
   .trim()

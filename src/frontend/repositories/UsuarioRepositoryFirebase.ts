@@ -7,7 +7,7 @@ import {
   NovoUsuario,
   UsuarioRepository,
 } from '../../core/business/ports/UsuarioRepository';
-import { auth, isFirebaseConfigured } from '../config/firebase';
+import { auth, isFirebaseConfigured } from '../../frontend/config/firebase';
 
 export class UsuarioRepositoryFirebase implements UsuarioRepository {
   async cadastrar(dados: NovoUsuario): Promise<{ id: string }> {

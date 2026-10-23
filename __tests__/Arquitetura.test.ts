@@ -55,10 +55,7 @@ const ALLOWED: Record<Layer, Layer[]> = {
  * NOVA violação falha. Se um item sair do código, o teste cobra a remoção daqui.
  * Solução definitiva: mover esses arquivos para src/frontend.
  */
-const KNOWN_DEBT = new Set([
-  'src/frontend/hooks/usePesk.ts -> src/backend/config/firebase.ts',
-  'src/frontend/factories/makeCadastrarUsuarioService.ts -> src/backend/data/UsuarioRepositoryFirebase.ts',
-]);
+const KNOWN_DEBT = new Set([]);
 
 /** Pacotes que só o servidor pode usar. */
 const SERVER_ONLY_PACKAGES = [/^firebase-admin(\/|$)/, /^fastify$/, /^@fastify\//, /^@google-cloud\//];
@@ -218,7 +215,6 @@ describe('Arquitetura em camadas do Pesk', () => {
     it('frontend não depende de servidor, exceto a dívida técnica listada', () => {
       const bad = layerViolations(edges)
         .filter(e => layerOf(e.from) === 'frontend')
-        .filter(e => !KNOWN_DEBT.has(label(e)));
       expect(bad.map(label)).toEqual([]);
     });
 

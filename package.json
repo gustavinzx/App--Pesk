@@ -41,7 +41,9 @@
     "test:backend": "npm --prefix src/backend test",
     "typecheck:backend": "npm --prefix src/backend run typecheck",
     "build:backend": "npm --prefix src/backend run build",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test:arquitetura": "jest --runInBand __tests__/Arquitetura.test.ts",
+    "test:tudo": "jest --runInBand && npm run test:backend"
   },
   "expo": {
     "install": {
