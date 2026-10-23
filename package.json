@@ -3,19 +3,30 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
+    "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~58.0.17",
+    "expo-constants": "~58.0.13",
+    "expo-font": "~58.0.9",
     "expo-image-picker": "~58.0.10",
+    "expo-linking": "~58.0.14",
+    "expo-router": "~58.0.25",
     "expo-status-bar": "~58.0.4",
     "firebase": "^13.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.0",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0",
     "react-native-web": "^0.21.4"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",
+    "@types/node": "^26.6.5",
     "@types/react": "~19.3.0",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~58.0.4",
     "jest": "~29.7.0",
     "jest-expo": "~58.0.12",
     "typescript": "~6.0.3"
@@ -29,7 +40,10 @@
     "dev:backend": "npm --prefix src/backend run dev",
     "test:backend": "npm --prefix src/backend test",
     "typecheck:backend": "npm --prefix src/backend run typecheck",
-    "build:backend": "npm --prefix src/backend run build"
+    "build:backend": "npm --prefix src/backend run build",
+    "lint": "expo lint",
+    "test:arquitetura": "jest --runInBand __tests__/Arquitetura.test.ts",
+    "test:tudo": "jest --runInBand && npm run test:backend"
   },
   "expo": {
     "install": {

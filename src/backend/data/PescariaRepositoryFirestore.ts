@@ -1,11 +1,14 @@
+import { CATALOGO_ESPECIES } from '../../core/domain/catalogoEspecies.js';
 import {
   FieldValue,
+  FieldPath,
   Timestamp,
   type Firestore,
   type Query,
 } from 'firebase-admin/firestore';
 import {
   CodigoConviteDuplicadoError,
+  CursorMensagemInvalidoError,
   LimiteDiarioRegistrosError,
   ParticipacaoDuplicadaError,
   type AlteracaoDesafio,
@@ -19,10 +22,43 @@ import type {
   Especie,
   Participacao,
   RegistroPesca,
+  MensagemGrupo,
+  PaginaMensagens,
 } from '../../core/domain/Pescaria.js';
 
 export class PescariaRepositoryFirestore implements PescariaRepository {
   constructor(private readonly firestore: Firestore) {}
+
+  async criarMensagem(mensagem: MensagemGrupo): Promise<void> {
+    const ref = this.firestore.collection('desafios').doc(mensagem.desafioId);
+    await this.firestore.runTransaction(async transaction => {
+      const [grupo, participante] = await Promise.all([
+        transaction.get(ref),
+        transaction.get(ref.collection('participacoes').doc(mensagem.pescadorId)),
+      ]);
+      if (!grupo.exists || this.mapearStatus(grupo.data()?.status) === 'cancelado' || !participante.exists || this.participacaoEncerrada(participante.data() ?? {})) {
+        throw new Error('Não é possível enviar mensagens para este grupo.');
+      }
+      transaction.create(ref.collection('mensagens').doc(mensagem.id), { ...mensagem, criadoEm: Timestamp.fromDate(new Date(mensagem.criadoEm)) });
+    });
+  }
+
+  async listarMensagens(desafioId: string, antes?: string): Promise<PaginaMensagens> {
+    const collection = this.firestore.collection('desafios').doc(desafioId).collection('mensagens');
+    let query: Query = collection.orderBy('criadoEm', 'desc').orderBy(FieldPath.documentId(), 'desc');
+    if (antes) {
+      const cursor = await collection.doc(antes).get();
+      if (!cursor.exists) throw new CursorMensagemInvalidoError();
+      query = query.startAfter(cursor);
+    }
+    const snapshot = await query.limit(51).get();
+    const docs = snapshot.docs.slice(0, 50);
+    const mensagens = docs.map(doc => {
+      const data = doc.data();
+      return { id: doc.id, desafioId, pescadorId: String(data.pescadorId), nomePescador: String(data.nomePescador), texto: String(data.texto ?? ''), criadoEm: this.iso(data.criadoEm), ...(data.fotoUrl ? { fotoUrl: String(data.fotoUrl) } : {}) };
+    }).reverse();
+    return { mensagens, proximoCursor: snapshot.size > 50 ? docs[docs.length - 1].id : null };
+  }
 
   async criarDesafio(
     desafio: NovoDesafio,
@@ -136,7 +172,7 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       transaction.update(ref, {
         nome: alteracoes.nome,
         inicioEm: Timestamp.fromDate(new Date(alteracoes.inicio)),
-        fimEm: Timestamp.fromDate(new Date(alteracoes.fim)),
+        fimEm: alteracoes.fim ? Timestamp.fromDate(new Date(alteracoes.fim)) : null,
         criteriosRanking: this.serializarCriteriosRanking(
           alteracoes.criteriosRanking,
           data.criteriosRanking
@@ -200,10 +236,9 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       ]);
       if (
         !desafio.exists ||
-        this.mapearStatus(desafio.data()?.status) !== 'aberto' ||
-        Date.now() >= this.dateValue(
-          desafio.data()?.inicioEm ?? desafio.data()?.inicio
-        )
+        (desafio.data()?.tipo === 'clube'
+          ? this.mapearStatus(desafio.data()?.status) !== 'ativo'
+          : this.mapearStatus(desafio.data()?.status) !== 'aberto' || Date.now() >= this.dateValue(desafio.data()?.inicioEm ?? desafio.data()?.inicio))
       ) {
         throw new Error('Este desafio não está aberto para participantes.');
       }
@@ -236,10 +271,9 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       ]);
       if (!challenge.exists || !participation.exists) return false;
       if (
-        this.mapearStatus(challenge.data()?.status) !== 'aberto' ||
-        Date.now() >= this.dateValue(
-          challenge.data()?.inicioEm ?? challenge.data()?.inicio
-        )
+        (challenge.data()?.tipo === 'clube'
+          ? this.mapearStatus(challenge.data()?.status) !== 'ativo'
+          : this.mapearStatus(challenge.data()?.status) !== 'aberto' || Date.now() >= this.dateValue(challenge.data()?.inicioEm ?? challenge.data()?.inicio))
       ) {
         throw new Error('A saída só é permitida antes do desafio começar.');
       }
@@ -315,10 +349,10 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
         transaction.get(especieRef),
         transaction.get(queryDia),
       ]);
-      if (!challenge.exists || !participation.exists || !species.exists) {
+      if (!challenge.exists || !participation.exists || (!species.exists && !CATALOGO_ESPECIES.some(item => item.id === registro.especieId))) {
         throw new Error('Desafio, participação ou espécie não encontrado.');
       }
-      const speciesData = species.data() ?? {};
+      const speciesData = CATALOGO_ESPECIES.find(item => item.id === registro.especieId) ?? species.data() ?? {};
       const challengeData = challenge.data() ?? {};
       if (
         !speciesData.ativa ||
@@ -470,7 +504,11 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       nome: desafio.nome,
       donoId: desafio.donoId,
       inicioEm: Timestamp.fromDate(new Date(desafio.inicio)),
-      fimEm: Timestamp.fromDate(new Date(desafio.fim)),
+      fimEm: desafio.fim ? Timestamp.fromDate(new Date(desafio.fim)) : null,
+      tipo: desafio.tipo ?? 'desafio',
+      descricao: desafio.descricao ?? '',
+      capaTema: desafio.capaTema ?? 'azul',
+      ...(desafio.capaUrl ? { capaUrl: desafio.capaUrl } : {}),
       status: this.serializarStatus(desafio.status),
       criteriosRanking: this.serializarCriteriosRanking(
         desafio.criteriosRanking
@@ -512,7 +550,11 @@ export class PescariaRepositoryFirestore implements PescariaRepository {
       codigoConvite,
       donoId: String(data.donoId ?? ''),
       inicio: this.iso(data.inicioEm ?? data.inicio),
-      fim: this.iso(data.fimEm ?? data.fim),
+      fim: data.tipo === 'clube' ? null : this.iso(data.fimEm ?? data.fim),
+      tipo: data.tipo === 'clube' ? 'clube' : 'desafio',
+      descricao: String(data.descricao ?? ''),
+      capaTema: data.capaTema === 'lima' || data.capaTema === 'rio' ? data.capaTema : 'azul',
+      ...(data.capaUrl ? { capaUrl: String(data.capaUrl) } : {}),
       status: this.mapearStatus(data.status),
       criteriosRanking: this.mapearCriteriosRanking(data.criteriosRanking),
       criadoEm: this.iso(data.criadoEm),

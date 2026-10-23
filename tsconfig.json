@@ -2,9 +2,10 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "types": ["jest"]
+    "types": ["node", "jest"]
   },
   "exclude": [
+    "src/backend/**/*.test.ts",
     "src/backend/server",
     "src/backend/auth",
     "src/backend/config/firebaseAdmin.ts",

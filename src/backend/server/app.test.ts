@@ -42,7 +42,7 @@ class MemoriaPerfilRepository implements PerfilUsuarioRepository {
   }
 }
 
-async function createTestServer(options: { tokenValido?: boolean } = {}) {
+async function createTestServer(options: { tokenValido?: boolean; corsOrigins?: string[] } = {}) {
   const repository = new MemoriaPerfilRepository();
   const gerenciarPerfil = new GerenciarPerfilUsuarioService(repository);
   const pescariaRepository = new MemoryPescariaRepository();
@@ -66,7 +66,7 @@ async function createTestServer(options: { tokenValido?: boolean } = {}) {
       let value = 0;
       return () => `id-${++value}`;
     })(),
-    () => 'INVITE1',
+    (() => { let value = 0; return () => 'INVITE' + ++value; })(),
     () => agora
   );
   const usuarios = {
@@ -88,7 +88,7 @@ async function createTestServer(options: { tokenValido?: boolean } = {}) {
       gerenciarPescarias,
       fotoStorage,
     },
-    { logger: false }
+    { logger: false, corsOrigins: options.corsOrigins }
   );
   return {
     server,
@@ -455,4 +455,274 @@ test('capture creation enforces reference weight and the daily limit', async () 
   } finally {
     await server.close();
   }
+});
+
+test('new groups persist metadata, cover, and only the largest-fish mode', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const headers = { authorization: 'Bearer owner-token' };
+  try {
+    const payload = { tipo: 'desafio', nome: 'Turma do rio', descricao: 'Nossa pescaria', capaTema: 'rio', inicio: '2026-10-17T09:00:00.000Z', fim: '2026-10-20T23:59:59.000Z', criteriosRanking: ['maior_peixe'], capaBase64: 'YWJj', capaMimeType: 'image/jpeg' };
+    const response = await server.inject({ method: 'POST', url: '/api/desafios', headers, payload });
+    assert.equal(response.statusCode, 201);
+    const group = response.json();
+    assert.equal(group.tipo, 'desafio');
+    assert.equal(group.descricao, 'Nossa pescaria');
+    assert.equal(group.capaTema, 'rio');
+    assert.match(group.capaUrl, /\/grupos\/.+\/capa/);
+    assert.deepEqual(group.criteriosRanking, ['maior_peixe']);
+    const detail = await server.inject({ method: 'GET', url: '/api/desafios/' + group.id, headers });
+    assert.equal(detail.json().descricao, 'Nossa pescaria');
+    assert.equal(detail.json().rankingMaiorPeixe[0].maiorPeixeKg, 0);
+    assert.deepEqual(detail.json().rankingPesoTotal, []);
+  } finally { await server.close(); }
+});
+
+test('group validation rejects unsupported scoring, invalid dates, and incomplete covers', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const headers = { authorization: 'Bearer owner-token' };
+  const base = { tipo: 'desafio', nome: 'Grupo inválido', inicio: '2026-10-17T09:00:00.000Z', fim: '2026-10-20T23:59:59.000Z', criteriosRanking: ['maior_peixe'] };
+  try {
+    for (const changes of [
+      { criteriosRanking: ['peso_total'] },
+      { fim: null },
+      { fim: '2026-10-16T00:00:00.000Z' },
+      { tipo: 'clube' },
+      { descricao: 'x'.repeat(501) },
+      { capaBase64: 'YWJj' },
+      { capaTema: 'inexistente' },
+    ]) {
+      const result = await server.inject({ method: 'POST', url: '/api/desafios', headers, payload: { ...base, ...changes } });
+      assert.equal(result.statusCode, 400, JSON.stringify(changes));
+    }
+  } finally { await server.close(); }
+});
+
+test('clubs remain active with one member and allow joining and capturing without an end date', async () => {
+  const { server, setNow } = await createTestServer({ tokenValido: true });
+  const owner = { authorization: 'Bearer owner-token' };
+  try {
+    const response = await server.inject({ method: 'POST', url: '/api/desafios', headers: owner, payload: { tipo: 'clube', nome: 'Clube do lago', descricao: '', inicio: '2026-10-16T12:00:00.000Z', fim: null, criteriosRanking: ['maior_peixe'] } });
+    assert.equal(response.statusCode, 201);
+    const club = response.json();
+    assert.equal(club.fim, null);
+    assert.equal(club.status, 'ativo');
+    const species = (await server.inject({ method: 'POST', url: '/api/especies', headers: owner, payload: { nome: 'Tucunaré', pesoMaxReferenciaKg: 20 } })).json();
+    setNow('2028-10-16T12:00:00.000Z');
+    const list = await server.inject({ method: 'GET', url: '/api/desafios', headers: owner });
+    assert.equal(list.json()[0].status, 'ativo');
+    const capture = await server.inject({ method: 'POST', url: '/api/desafios/' + club.id + '/registros', headers: owner, payload: { especieId: species.id, pesoKg: 3, local: 'Lago', dataHora: '2028-10-16T11:00:00.000Z', fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' } });
+    assert.equal(capture.statusCode, 201);
+    const join = await server.inject({ method: 'POST', url: '/api/desafios/entrar', headers: { authorization: 'Bearer guest-token' }, payload: { codigoConvite: club.codigoConvite } });
+    assert.equal(join.statusCode, 201);
+  } finally { await server.close(); }
+});
+
+test('largest-fish ranking uses one capture per fisher, breaks ties by capture time, and excludes contested fish', async () => {
+  const { server, setNow, pescariaRepository } = await createTestServer({ tokenValido: true });
+  const owner = { authorization: 'Bearer owner-token' };
+  const guest = { authorization: 'Bearer guest-token' };
+  try {
+    const club = (await server.inject({ method: 'POST', url: '/api/desafios', headers: owner, payload: { tipo: 'clube', nome: 'Ranking', inicio: '2026-10-16T12:00:00.000Z', fim: null, criteriosRanking: ['maior_peixe'] } })).json();
+    await server.inject({ method: 'POST', url: '/api/desafios/entrar', headers: guest, payload: { codigoConvite: club.codigoConvite } });
+    const species = (await server.inject({ method: 'POST', url: '/api/especies', headers: owner, payload: { nome: 'Dourado', pesoMaxReferenciaKg: 20 } })).json();
+    setNow('2026-10-17T12:00:00.000Z');
+    async function capture(headers: typeof owner, weight: number, time: string) {
+      const result = await server.inject({ method: 'POST', url: '/api/desafios/' + club.id + '/registros', headers, payload: { especieId: species.id, pesoKg: weight, local: 'Rio', dataHora: time, fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' } });
+      assert.equal(result.statusCode, 201);
+      return result.json();
+    }
+    await capture(owner, 5, '2026-10-17T08:00:00.000Z');
+    await capture(owner, 5, '2026-10-17T09:00:00.000Z');
+    const largest = await capture(guest, 7, '2026-10-17T10:00:00.000Z');
+    let detail = (await server.inject({ method: 'GET', url: '/api/desafios/' + club.id, headers: owner })).json();
+    assert.equal(detail.rankingMaiorPeixe[0].pescadorId, 'guest-uid');
+    assert.equal(detail.rankingMaiorPeixe[0].maiorPeixeKg, 7);
+    await capture(owner, 7, '2026-10-17T11:00:00.000Z');
+    detail = (await server.inject({ method: 'GET', url: '/api/desafios/' + club.id, headers: owner })).json();
+    assert.equal(detail.rankingMaiorPeixe[0].pescadorId, 'guest-uid');
+    const record = pescariaRepository.registros.get(largest.id)!;
+    pescariaRepository.registros.set(largest.id, { ...record, status: 'contestado' });
+    detail = (await server.inject({ method: 'GET', url: '/api/desafios/' + club.id, headers: owner })).json();
+    assert.equal(detail.rankingMaiorPeixe[0].pescadorId, 'owner-uid');
+    assert.equal(detail.melhorPeixe.pescadorId, 'owner-uid');
+    assert.deepEqual(detail.rankingPesoTotal, []);
+  } finally { await server.close(); }
+});
+
+test('cover uploads are cleaned up if group persistence fails', async () => {
+  class FailingRepository extends MemoryPescariaRepository {
+    override async criarDesafio(): Promise<void> { throw new Error('database unavailable'); }
+  }
+  const deleted: string[] = [];
+  const service = new GerenciarPescariasService(
+    new FailingRepository(),
+    {
+      async salvar(path: string) { return { url: 'http://localhost/uploads/' + path, path }; },
+      async excluir(path: string) { deleted.push(path); },
+      async obter() { return null; },
+    },
+    () => 'group-id',
+    () => 'CODE',
+    () => new Date('2026-10-16T12:00:00.000Z')
+  );
+  await assert.rejects(() => service.criarDesafio('owner', {
+    tipo: 'clube', nome: 'Clube', inicio: '2026-10-16T12:00:00.000Z', fim: null,
+    criteriosRanking: ['maior_peixe'], capaBase64: 'YWJj', capaMimeType: 'image/jpeg',
+  }), /database unavailable/);
+  assert.deepEqual(deleted, ['grupos/group-id/capa']);
+});
+
+async function createChatClub(server: Awaited<ReturnType<typeof createTestServer>>['server'], name = 'Clube do chat') {
+  const response = await server.inject({ method: 'POST', url: '/api/desafios', headers: { authorization: 'Bearer owner-token' }, payload: { nome: name, tipo: 'clube', inicio: '2026-10-16T12:00:00.000Z', fim: null, criteriosRanking: ['maior_peixe'] } });
+  assert.equal(response.statusCode, 201);
+  return response.json<{ id: string; codigoConvite: string }>();
+}
+
+test('group chat restricts access to members and derives authors from authentication', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const owner = { authorization: 'Bearer owner-token' };
+  const guest = { authorization: 'Bearer guest-token' };
+  try {
+    const group = await createChatClub(server);
+    const url = '/api/desafios/' + group.id + '/mensagens';
+    assert.equal((await server.inject({ method: 'GET', url })).statusCode, 401);
+    assert.equal((await server.inject({ method: 'GET', url, headers: guest })).statusCode, 403);
+    assert.equal((await server.inject({ method: 'POST', url, headers: guest, payload: { texto: 'Não participo' } })).statusCode, 403);
+    assert.equal((await server.inject({ method: 'POST', url, headers: owner, payload: { texto: 'Oi', pescadorId: 'guest-uid' } })).statusCode, 400);
+    const send = await server.inject({ method: 'POST', url, headers: owner, payload: { texto: '  Olá, pescadores!  ' } });
+    assert.equal(send.statusCode, 201);
+    assert.equal(send.json().texto, 'Olá, pescadores!');
+    assert.equal(send.json().pescadorId, 'owner-uid');
+    assert.equal(send.json().nomePescador, 'owner@pesk.com');
+    const history = await server.inject({ method: 'GET', url, headers: owner });
+    assert.equal(history.json().mensagens.length, 1);
+    assert.equal(history.json().mensagens[0].id, send.json().id);
+    assert.equal(history.json().proximoCursor, null);
+  } finally { await server.close(); }
+});
+
+test('group chat validates text, photos, and closed groups', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const headers = { authorization: 'Bearer owner-token' };
+  try {
+    const group = await createChatClub(server);
+    const url = '/api/desafios/' + group.id + '/mensagens';
+    for (const payload of [{}, { texto: ' ' }, { texto: 'x'.repeat(2001) }, { fotoBase64: 'YWJj' }, { fotoMimeType: 'image/jpeg' }, { fotoBase64: 'bad bytes!', fotoMimeType: 'image/jpeg' }]) {
+      assert.equal((await server.inject({ method: 'POST', url, headers, payload })).statusCode, 400);
+    }
+    const photo = await server.inject({ method: 'POST', url, headers, payload: { texto: 'Meu peixe', fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' } });
+    assert.equal(photo.statusCode, 201);
+    assert.match(photo.json().fotoUrl, /\/chat\//);
+    assert.equal('fotoBase64' in photo.json(), false);
+    await server.inject({ method: 'POST', url: '/api/desafios/' + group.id + '/cancelar', headers });
+    assert.equal((await server.inject({ method: 'POST', url, headers, payload: { texto: 'Grupo encerrado' } })).statusCode, 409);
+  } finally { await server.close(); }
+});
+
+test('chat history paginates without duplicates and stays isolated between groups', async () => {
+  const { server, setNow } = await createTestServer({ tokenValido: true });
+  const headers = { authorization: 'Bearer owner-token' };
+  try {
+    const a = await createChatClub(server, 'Grupo A');
+    const b = await createChatClub(server, 'Grupo B');
+    const url = '/api/desafios/' + a.id + '/mensagens';
+    for (let i = 0; i < 55; i++) {
+      setNow(new Date(Date.UTC(2026, 9, 16, 13, 0, i)).toISOString());
+      const response = await server.inject({ method: 'POST', url, headers, payload: { texto: 'Mensagem ' + i } });
+      assert.equal(response.statusCode, 201);
+    }
+    const privateMessage = (await server.inject({ method: 'POST', url: '/api/desafios/' + b.id + '/mensagens', headers, payload: { texto: 'Somente grupo B' } })).json();
+    const first = (await server.inject({ method: 'GET', url, headers })).json();
+    assert.equal(first.mensagens.length, 50);
+    assert.equal(first.mensagens[0].texto, 'Mensagem 5');
+    assert.equal(first.mensagens[49].texto, 'Mensagem 54');
+    const second = (await server.inject({ method: 'GET', url: url + '?antes=' + first.proximoCursor, headers })).json();
+    assert.equal(second.mensagens.length, 5);
+    assert.equal(second.proximoCursor, null);
+    assert.equal(new Set([...first.mensagens, ...second.mensagens].map(item => item.id)).size, 55);
+    assert.equal((await server.inject({ method: 'GET', url: url + '?antes=' + privateMessage.id, headers })).statusCode, 400);
+  } finally { await server.close(); }
+});
+
+test('leaving a club removes it from the member directory and revokes chat access', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const owner = { authorization: 'Bearer owner-token' };
+  const guest = { authorization: 'Bearer guest-token' };
+  try {
+    const group = await createChatClub(server);
+    await server.inject({ method: 'POST', url: '/api/desafios/entrar', headers: guest, payload: { codigoConvite: group.codigoConvite } });
+    assert.equal((await server.inject({ method: 'GET', url: '/api/desafios', headers: guest })).json().length, 1);
+    assert.equal((await server.inject({ method: 'DELETE', url: '/api/desafios/' + group.id + '/participantes/me', headers: owner })).statusCode, 409);
+    assert.equal((await server.inject({ method: 'DELETE', url: '/api/desafios/' + group.id + '/participantes/me', headers: guest })).statusCode, 204);
+    assert.equal((await server.inject({ method: 'GET', url: '/api/desafios', headers: guest })).json().length, 0);
+    assert.equal((await server.inject({ method: 'GET', url: '/api/desafios/' + group.id + '/mensagens', headers: guest })).statusCode, 403);
+    assert.equal((await server.inject({ method: 'POST', url: '/api/desafios/' + group.id + '/mensagens', headers: guest, payload: { texto: 'Saí' } })).statusCode, 403);
+  } finally { await server.close(); }
+});
+
+test('chat photo uploads are removed if message persistence fails', async () => {
+  class FailingMessages extends MemoryPescariaRepository {
+    override async criarMensagem(): Promise<void> { throw new Error('message persistence failed'); }
+  }
+  const deleted: string[] = [];
+  const repository = new FailingMessages();
+  let count = 0;
+  const service = new GerenciarPescariasService(repository, {
+    async salvar(path: string) { return { url: 'http://localhost/' + path, path }; },
+    async excluir(path: string) { deleted.push(path); }, async obter() { return null; },
+  }, () => 'msg-' + ++count, () => 'CODE', () => new Date('2026-10-16T12:00:00.000Z'));
+  const group = await service.criarDesafio('owner', { tipo: 'clube', nome: 'Clube', inicio: '2026-10-16T12:00:00.000Z', fim: null });
+  await assert.rejects(() => service.enviarMensagem(group.id, 'owner', 'Pescador', { texto: '', fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' }), /message persistence failed/);
+  assert.equal(deleted.length, 1);
+  assert.match(deleted[0], /\/chat\//);
+});
+
+
+test('fixed catalog fish can be captured without manual species registration', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const headers = { authorization: 'Bearer owner-token' };
+  try {
+    const club = (await server.inject({ method: 'POST', url: '/api/desafios', headers, payload: { tipo: 'clube', nome: 'Samburá teste', inicio: '2026-10-16T12:00:00.000Z', fim: null, criteriosRanking: ['maior_peixe'] } })).json();
+    const capture = await server.inject({ method: 'POST', url: '/api/desafios/' + club.id + '/registros', headers, payload: { especieId: 'catalogo-tucunare', pesoKg: 3, local: 'Lago', dataHora: '2026-10-16T12:00:00.000Z', fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' } });
+    assert.equal(capture.statusCode, 201, capture.body);
+    assert.equal(capture.json().nomeEspecie, 'Tucunaré');
+    const detail = (await server.inject({ method: 'GET', url: '/api/desafios/' + club.id, headers })).json();
+    assert.equal(detail.rankingMaiorPeixe[0].maiorPeixeKg, 3);
+  } finally { await server.close(); }
+});
+
+
+test('profile updates persist photo and description and preserve omitted fields', async () => {
+  const { server } = await createTestServer({ tokenValido: true });
+  const headers = { authorization: 'Bearer valid-token' };
+  try {
+    await server.inject({ method: 'POST', url: '/api/usuarios/me', headers, payload: { nome: 'Ana' } });
+    const updated = await server.inject({ method: 'PATCH', url: '/api/usuarios/me', headers, payload: { nome: 'Ana Pesca', descricao: '  Pesco no lago  ', fotoBase64: 'YWJj', fotoMimeType: 'image/jpeg' } });
+    assert.equal(updated.statusCode, 200, updated.body);
+    assert.equal(updated.json().descricao, 'Pesco no lago');
+    assert.match(updated.json().fotoUrl, /uploads\/perfis\/firebase-uid-123/);
+    await server.inject({ method: 'PATCH', url: '/api/usuarios/me', headers, payload: { nome: 'Ana' } });
+    const saved = (await server.inject({ method: 'GET', url: '/api/usuarios/me', headers })).json();
+    assert.equal(saved.descricao, 'Pesco no lago');
+    assert.equal(saved.fotoUrl, updated.json().fotoUrl);
+    const invalid = await server.inject({ method: 'PATCH', url: '/api/usuarios/me', headers, payload: { nome: 'Ana', descricao: 'x'.repeat(501) } });
+    assert.equal(invalid.statusCode, 400);
+  } finally { await server.close(); }
+});
+
+
+test('browser preflight permits profile edits and deletes from configured origins', async () => {
+  const origin = 'http://localhost:8081';
+  const { server } = await createTestServer({ corsOrigins: [origin] });
+  try {
+    for (const method of ['PATCH', 'DELETE']) {
+      const response = await server.inject({ method: 'OPTIONS', url: '/api/usuarios/me', headers: { origin, 'access-control-request-method': method, 'access-control-request-headers': 'authorization,content-type' } });
+      assert.equal(response.statusCode, 204);
+      assert.equal(response.headers['access-control-allow-origin'], origin);
+      assert.ok(String(response.headers['access-control-allow-methods']).split(',').map(value => value.trim()).includes(method));
+      assert.match(String(response.headers['access-control-allow-headers']), /authorization/);
+    }
+    const untrusted = await server.inject({ method: 'OPTIONS', url: '/api/usuarios/me', headers: { origin: 'https://unlisted.example', 'access-control-request-method': 'PATCH' } });
+    assert.equal(untrusted.headers['access-control-allow-origin'], undefined);
+  } finally { await server.close(); }
 });

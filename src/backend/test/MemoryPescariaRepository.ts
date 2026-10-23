@@ -1,5 +1,6 @@
 import {
   CodigoConviteDuplicadoError,
+  CursorMensagemInvalidoError,
   LimiteDiarioRegistrosError,
   ParticipacaoDuplicadaError,
   type AlteracaoDesafio,
@@ -13,9 +14,23 @@ import type {
   Especie,
   Participacao,
   RegistroPesca,
+  MensagemGrupo,
+  PaginaMensagens,
 } from '../../core/domain/Pescaria.js';
 
 export class MemoryPescariaRepository implements PescariaRepository {
+  readonly mensagens = new Map<string, MensagemGrupo>();
+
+  async criarMensagem(mensagem: MensagemGrupo): Promise<void> { this.mensagens.set(mensagem.id, { ...mensagem }); }
+
+  async listarMensagens(desafioId: string, antes?: string): Promise<PaginaMensagens> {
+    const sorted = [...this.mensagens.values()].filter(item => item.desafioId === desafioId).sort((a, b) => b.criadoEm.localeCompare(a.criadoEm) || b.id.localeCompare(a.id));
+    const index = antes ? sorted.findIndex(item => item.id === antes) : -1;
+    if (antes && index < 0) throw new CursorMensagemInvalidoError();
+    const remaining = sorted.slice(index + 1);
+    const page = remaining.slice(0, 50);
+    return { mensagens: [...page].reverse(), proximoCursor: remaining.length > 50 ? page[page.length - 1].id : null };
+  }
   readonly desafios = new Map<string, Desafio>();
   readonly especies = new Map<string, Especie>();
   readonly registros = new Map<string, RegistroPesca>();

@@ -10,7 +10,7 @@ O backend é organizado em camadas. As dependências seguem Presentation → Bus
 - `src/core/business`: camada de negócio/aplicação, incluindo `GerenciarPerfilUsuarioService` e as portas dos repositórios/verificador de token.
 - `src/core/domain`: modelos `Usuario`, `Desafio`, `Participacao`, `Especie` e `RegistroPesca`, sem dependência de Fastify ou Firebase.
 - `src/backend/config/firebaseAdmin.ts`: configuração e inicialização do Firebase Admin no servidor; `src/backend/data` e `src/backend/auth` contêm adaptadores para Firestore, fotos locais e validação de ID tokens.
-- `src/frontend` e os adaptadores em `src/backend/config` e `src/backend/data/UsuarioRepositoryFirebase.ts`: cliente Expo. Esse repositório de cadastro do cliente só cria a conta Firebase Auth e chama a API; o servidor persiste o perfil.
+- `src/frontend`: cliente Expo, incluindo o Firebase Web SDK (`src/frontend/config/firebase.ts`) e o repositório de cadastro do cliente (`src/frontend/repositories/UsuarioRepositoryFirebase.ts`). Esse repositório só cria a conta Firebase Auth e chama a API; o servidor persiste o perfil. `src/backend` contém apenas código de servidor.
 - `firestore.rules`: bloqueia acesso direto dos clientes aos perfis; somente o servidor com Firebase Admin SDK os lê e grava.
 
 A senha é usada somente para criar a conta no Firebase Authentication. Ela não é enviada à API nem gravada no Firestore. O app envia o nome e um Firebase ID token; a API verifica o token e obtém UID/e-mail da identidade verificada.
@@ -125,6 +125,49 @@ Os documentos criados podem ser conferidos no Firebase Console em `desafios`, `d
 - Backend: `npm run test:backend`
 - Tipos do backend: `npm run typecheck:backend`
 - Build do backend: `npm run build:backend`
+- Arquitetura em camadas: `npm run test:arquitetura`
+- Todos os testes (app, arquitetura e backend): `npm run test:tudo`
+
+### Teste de arquitetura em camadas
+
+O projeto tem um teste automatizado que confere as regras de dependência entre camadas, no mesmo espírito do ArchUnit do Java. Ele lê os `import` de todos os arquivos de `src/`, classifica cada arquivo em uma camada pelo caminho e falha se algum import violar as regras. A regra central é que a apresentação nunca acessa o banco: ela fala só com a camada de negócio, que fala com a de dados.
+
+O teste fica em `__tests__/Arquitetura.test.ts`, roda no Jest que o app já usa e precisa apenas de `@types/node` para os tipos (`npm install --save-dev @types/node`).
+
+Camadas e dependências permitidas. Tudo que não está na tabela é proibido:
+
+| Camada | Caminho | Pode depender de |
+| --- | --- | --- |
+| Domínio | `src/core/domain` | somente domínio |
+| Negócio | `src/core/business` | negócio e domínio |
+| Apresentação HTTP | `src/backend/server` (exceto `server.ts`) | HTTP, negócio e domínio |
+| Composição | `src/backend/server/server.ts` | todas as camadas do backend, negócio e domínio |
+| Dados | `src/backend/data` | dados, config, negócio e domínio |
+| Autenticação | `src/backend/auth` | auth, config, negócio e domínio |
+| Config | `src/backend/config` | somente config |
+| Testes do backend | `src/backend/test` | negócio e domínio |
+| Frontend | `src/frontend` | frontend, negócio e domínio |
+| Rotas do Expo | `src/app` | rotas e frontend |
+
+Só `server.ts` monta as implementações concretas, e nenhuma outra camada pode depender dele.
+
+Regras verificadas:
+
+- O domínio não depende de nenhuma outra camada, e o negócio depende só do domínio.
+- A apresentação HTTP nunca importa a camada de dados nem `firebase`.
+- Dados, auth e config não dependem da API HTTP nem do frontend.
+- Domínio e negócio não usam Firebase, Fastify, React nem Expo.
+- `firebase-admin` e `fastify` existem só no servidor, e o cliente não importa `firebase/firestore`: ele fala com o banco apenas pela API.
+- Não há dependências circulares entre arquivos.
+- Todo arquivo de `src/` pertence a uma camada conhecida, e todo import relativo aponta para um arquivo que existe.
+
+O teste também roda as regras sobre um grafo fictício com violações propositais, para provar que o detector falha quando deve.
+
+Violações conhecidas e ainda não corrigidas podem ser registradas na lista `KNOWN_DEBT`, no formato `origem -> destino`. Hoje ela está vazia. Qualquer violação fora da lista falha, e itens que deixarem de existir no código são cobrados para remoção.
+
+Na primeira execução, o teste acusou que o cliente Firebase Web, que roda no aplicativo, estava em `src/backend` e era importado pelo frontend e por `src/app/perfil.tsx`. Os arquivos foram movidos: `src/backend/config/firebase.ts` agora é `src/frontend/config/firebase.ts`, e `src/backend/data/UsuarioRepositoryFirebase.ts` agora é `src/frontend/repositories/UsuarioRepositoryFirebase.ts`.
+
+Limitações: imports com alias de caminho (como `@/...`) são tratados como pacote externo e não são verificados; arquivos `*.test.ts`, `dist` e `node_modules` são ignorados; o teste analisa dependências entre arquivos, não o comportamento do app.
 
 ## Publicar regras do Firestore
 

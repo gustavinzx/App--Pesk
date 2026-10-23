@@ -41,7 +41,12 @@ interface CreateProfileBody {
 interface DesafioBody {
   nome: string;
   inicio: string;
-  fim: string;
+  fim: string | null;
+  tipo?: 'desafio' | 'clube';
+  descricao?: string;
+  capaTema?: 'azul' | 'lima' | 'rio';
+  capaBase64?: string;
+  capaMimeType?: string;
   criteriosRanking?: CriterioRanking[];
 }
 
@@ -97,7 +102,12 @@ const schemaDesafio = {
   properties: {
     nome: { type: 'string', minLength: 1, maxLength: 80, pattern: '.*\\S.*' },
     inicio: { type: 'string', minLength: 1 },
-    fim: { type: 'string', minLength: 1 },
+    fim: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] },
+    tipo: { type: 'string', enum: ['desafio', 'clube'] },
+    descricao: { type: 'string', maxLength: 500 },
+    capaTema: { type: 'string', enum: ['azul', 'lima', 'rio'] },
+    capaBase64: { type: 'string', minLength: 1, maxLength: 5600000 },
+    capaMimeType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] },
     criteriosRanking: {
       type: 'array',
       minItems: 1,
@@ -200,6 +210,7 @@ export async function buildServer(
 
   await server.register(cors, {
     origin: options.corsOrigins?.length ? options.corsOrigins : false,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   server.decorateRequest('usuarioAutenticado', null);
 
@@ -268,17 +279,22 @@ export async function buildServer(
     }
   );
 
-  server.patch<{ Body: CreateProfileBody }>(
+  server.patch<{ Body: CreateProfileBody & { descricao?: string; fotoBase64?: string; fotoMimeType?: string } }>(
     '/api/usuarios/me',
-    { schema: { body: schemaNome }, preHandler: autenticar },
+    { schema: { body: { ...schemaNome, properties: { ...schemaNome.properties, descricao: { type: 'string', maxLength: 500 }, fotoBase64: { type: 'string', minLength: 4, maxLength: 5592408, pattern: '^[A-Za-z0-9+/]+={0,2}$' }, fotoMimeType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] } }, dependencies: { fotoBase64: ['fotoMimeType'], fotoMimeType: ['fotoBase64'] } } }, preHandler: autenticar },
     async (request, reply) => {
       const user = request.usuarioAutenticado!;
+      let uploaded: { url: string; path: string } | undefined;
       try {
+        await dependencies.gerenciarPerfil.buscar(user.uid);
+        if (request.body.fotoBase64 && request.body.fotoMimeType) uploaded = await dependencies.fotoStorage.salvar('perfis/' + user.uid + '/' + Date.now(), request.body.fotoBase64, request.body.fotoMimeType);
         return await dependencies.gerenciarPerfil.atualizar(
           user.uid,
-          request.body.nome
+          request.body.nome,
+          { ...(request.body.descricao !== undefined ? { descricao: request.body.descricao.trim() } : {}), ...(uploaded ? { fotoUrl: uploaded.url } : {}) }
         );
       } catch (error) {
+        if (uploaded) await dependencies.fotoStorage.excluir(uploaded.path).catch(() => undefined);
         return responderErro(error, reply, request);
       }
     }
@@ -357,6 +373,27 @@ export async function buildServer(
       } catch (error) {
         return responderErro(error, reply, request);
       }
+    }
+  );
+
+  server.get<{ Params: { desafioId: string }; Querystring: { antes?: string } }>(
+    '/api/desafios/:desafioId/mensagens',
+    { preHandler: autenticar, schema: { querystring: { type: 'object', additionalProperties: false, properties: { antes: { type: 'string', maxLength: 128, pattern: '^[a-zA-Z0-9_-]+$' } } } } },
+    async (request, reply) => {
+      try { return await dependencies.gerenciarPescarias.listarMensagens(request.params.desafioId, request.usuarioAutenticado!.uid, request.query.antes); }
+      catch (error) { return responderErro(error, reply, request); }
+    }
+  );
+
+  server.post<{ Params: { desafioId: string }; Body: { texto?: string; fotoBase64?: string; fotoMimeType?: string } }>(
+    '/api/desafios/:desafioId/mensagens',
+    { preHandler: autenticar, schema: { body: { type: 'object', additionalProperties: false, properties: { texto: { type: 'string', maxLength: 2000 }, fotoBase64: { type: 'string', minLength: 1, maxLength: 5600000 }, fotoMimeType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] } } } } },
+    async (request, reply) => {
+      try {
+        const user = request.usuarioAutenticado!;
+        const message = await dependencies.gerenciarPescarias.enviarMensagem(request.params.desafioId, user.uid, user.nome ?? user.email, request.body);
+        return reply.code(201).send(message);
+      } catch (error) { return responderErro(error, reply, request); }
     }
   );
 
