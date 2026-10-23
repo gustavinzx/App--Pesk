@@ -58,10 +58,13 @@ export interface ItemRanking {
   nomePescador: string;
   quantidadePeixes: number;
   pesoTotalKg: number;
+  maiorPeixeKg: number | null;
+  tempoAtePrimeiraCapturaMs: number | null;
 }
 
 export interface DetalheDesafio extends Desafio {
   participantes: Participacao[];
+  ranking: ItemRanking[];
   rankingPesoTotal: ItemRanking[];
   melhorPeixe: (RegistroPesca & { nomePescador: string }) | null;
 }

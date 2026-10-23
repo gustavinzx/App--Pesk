@@ -55,12 +55,22 @@ export interface RegistroDto {
 
 export interface DesafioDetalheDto extends DesafioDto {
   participantes: ParticipacaoDto[];
-  rankingPesoTotal: Array<{
+  ranking: {
     pescadorId: string;
     nomePescador: string;
     quantidadePeixes: number;
     pesoTotalKg: number;
-  }>;
+    maiorPeixeKg: number | null;
+    tempoAtePrimeiraCapturaMs: number | null;
+  }[];
+  rankingPesoTotal: {
+    pescadorId: string;
+    nomePescador: string;
+    quantidadePeixes: number;
+    pesoTotalKg: number;
+    maiorPeixeKg: number | null;
+    tempoAtePrimeiraCapturaMs: number | null;
+  }[];
   melhorPeixe: (RegistroDto & { nomePescador: string }) | null;
 }
 

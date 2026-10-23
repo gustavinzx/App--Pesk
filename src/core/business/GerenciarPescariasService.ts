@@ -156,12 +156,15 @@ export class GerenciarPescariasService {
     const porPescador = new Map(participantes.map((p) => [p.pescadorId, p]));
     const registrosValidos = registros.filter((r) => r.status === 'valido');
     const totais = new Map<string, ItemRanking>();
+    const primeirasCapturas = new Map<string, string>();
     for (const participante of participantes) {
       totais.set(participante.pescadorId, {
         pescadorId: participante.pescadorId,
         nomePescador: participante.nomePescador,
         quantidadePeixes: 0,
         pesoTotalKg: 0,
+        maiorPeixeKg: null,
+        tempoAtePrimeiraCapturaMs: null,
       });
     }
     for (const registro of registrosValidos) {
@@ -171,41 +174,55 @@ export class GerenciarPescariasService {
         total.pesoTotalKg = Number(
           (total.pesoTotalKg + registro.pesoKg).toFixed(3)
         );
+        total.maiorPeixeKg = Math.max(total.maiorPeixeKg ?? 0, registro.pesoKg);
+        const primeiraCaptura = primeirasCapturas.get(registro.pescadorId);
+        if (!primeiraCaptura || registro.dataHora < primeiraCaptura) {
+          primeirasCapturas.set(registro.pescadorId, registro.dataHora);
+        }
       }
     }
-    const usaRankingPeso = status.criteriosRanking.some((criterio) =>
-      ['peso_total', 'mais_peixes', 'menor_tempo'].includes(criterio)
+    const inicioDesafioMs = Date.parse(status.inicio);
+    for (const [pescadorId, dataHora] of primeirasCapturas) {
+      const tempoCapturaMs = Date.parse(dataHora);
+      const total = totais.get(pescadorId);
+      if (
+        total &&
+        Number.isFinite(inicioDesafioMs) &&
+        Number.isFinite(tempoCapturaMs)
+      ) {
+        total.tempoAtePrimeiraCapturaMs = Math.max(
+          0,
+          tempoCapturaMs - inicioDesafioMs
+        );
+      }
+    }
+
+    // A classificação combinada usa critérios lexicográficos: cada critério
+    // só desempata quando o anterior é igual. Participantes sem capturas ficam
+    // atrás de quem já pescou quando quantidade e maior peixe empatam.
+    const ranking = [...totais.values()].sort((a, b) => {
+      const compareCount = b.quantidadePeixes - a.quantidadePeixes;
+      if (compareCount !== 0) return compareCount;
+
+      const compareBiggestFish =
+        (b.maiorPeixeKg ?? -1) - (a.maiorPeixeKg ?? -1);
+      if (compareBiggestFish !== 0) return compareBiggestFish;
+
+      const tempoA = a.tempoAtePrimeiraCapturaMs;
+      const tempoB = b.tempoAtePrimeiraCapturaMs;
+      if (tempoA !== null && tempoB === null) return -1;
+      if (tempoA === null && tempoB !== null) return 1;
+      if (tempoA !== null && tempoB !== null && tempoA !== tempoB) {
+        return tempoA - tempoB;
+      }
+      return a.pescadorId.localeCompare(b.pescadorId);
+    });
+    const rankingPesoTotal = [...totais.values()].sort(
+      (a, b) =>
+        b.pesoTotalKg - a.pesoTotalKg ||
+        b.quantidadePeixes - a.quantidadePeixes ||
+        a.pescadorId.localeCompare(b.pescadorId)
     );
-    const rankingPesoTotal = usaRankingPeso
-      ? [...totais.values()].sort(
-          (a, b) => {
-            const compareWeight = b.pesoTotalKg - a.pesoTotalKg;
-            const compareCount = b.quantidadePeixes - a.quantidadePeixes;
-            if (
-              status.criteriosRanking.includes('menor_tempo') &&
-              compareWeight === 0 &&
-              compareCount === 0
-            ) {
-              const earliestA = registrosValidos
-                .filter((registro) => registro.pescadorId === a.pescadorId)
-                .map((registro) => registro.dataHora)
-                .sort()[0];
-              const earliestB = registrosValidos
-                .filter((registro) => registro.pescadorId === b.pescadorId)
-                .map((registro) => registro.dataHora)
-                .sort()[0];
-              if (earliestA && earliestB) {
-                return earliestA.localeCompare(earliestB);
-              }
-            }
-            return (
-              compareWeight ||
-              compareCount ||
-              a.pescadorId.localeCompare(b.pescadorId)
-            );
-          }
-        )
-      : [];
     const melhorRegistro = [...registrosValidos].sort(
       (a, b) =>
         b.pesoKg - a.pesoKg ||
@@ -221,7 +238,7 @@ export class GerenciarPescariasService {
               melhorRegistro.pescadorId,
           }
         : null;
-    return { ...status, participantes, rankingPesoTotal, melhorPeixe };
+    return { ...status, participantes, ranking, rankingPesoTotal, melhorPeixe };
   }
 
   async atualizarDesafio(

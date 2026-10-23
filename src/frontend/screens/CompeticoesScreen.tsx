@@ -46,6 +46,16 @@ function dataLocal(date: Date) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
+function formatarDuracao(milliseconds: number) {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours) return `${hours}h ${minutes}min`;
+  if (minutes) return `${minutes}min ${seconds}s`;
+  return `${seconds}s`;
+}
+
 function Input({
   label,
   value,
@@ -615,12 +625,18 @@ export default function CompeticoesScreen({
                     • {participant.nomePescador}
                   </Text>
                 ))}
-                <Text style={styles.sectionTitle}>Ranking por peso</Text>
-                {detalhe.rankingPesoTotal.map((rank, index) => (
+                <Text style={styles.sectionTitle}>Ranking combinado</Text>
+                <Text style={styles.hint}>
+                  Mais peixes, maior captura e menor tempo até o primeiro peixe.
+                </Text>
+                {detalhe.ranking.map((rank, index) => (
                   <Text key={rank.pescadorId} style={styles.bodyText}>
-                    {index + 1}. {rank.nomePescador} —{' '}
-                    {rank.pesoTotalKg.toFixed(2)} kg ({rank.quantidadePeixes}{' '}
-                    peixes)
+                    {index + 1}. {rank.nomePescador} — {rank.quantidadePeixes}{' '}
+                    peixes · maior: {rank.maiorPeixeKg?.toFixed(2) ?? '—'} kg
+                    {' · 1º peixe em '}
+                    {rank.tempoAtePrimeiraCapturaMs === null
+                      ? '—'
+                      : formatarDuracao(rank.tempoAtePrimeiraCapturaMs)}
                   </Text>
                 ))}
                 {detalhe.melhorPeixe ? (
