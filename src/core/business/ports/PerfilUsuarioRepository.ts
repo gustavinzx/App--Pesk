@@ -3,12 +3,16 @@ import { Usuario } from '../../domain/Usuario';
 export interface NovoPerfilUsuario {
   id: string;
   nome: string;
+  descricao?: string;
+  fotoUrl?: string;
   email: string;
   criadoEm: string;
 }
 
 export interface AtualizacaoPerfilUsuario {
   nome: string;
+  descricao?: string;
+  fotoUrl?: string;
   atualizadoEm: string;
 }
 

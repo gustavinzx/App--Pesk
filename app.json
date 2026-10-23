@@ -13,10 +13,13 @@
           "microphonePermission": false
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-router",
+      "expo-font"
     ],
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "pesk",
     "ios": {
       "supportsTablet": true
     },

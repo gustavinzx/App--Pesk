@@ -1,3 +1,4 @@
+import { CATALOGO_ESPECIES } from '../domain/catalogoEspecies.js';
 import type {
   CriterioRanking,
   Desafio,
@@ -6,9 +7,12 @@ import type {
   ItemRanking,
   Participacao,
   RegistroPesca,
+  MensagemGrupo,
+  PaginaMensagens,
 } from '../domain/Pescaria';
 import {
   CodigoConviteDuplicadoError,
+  CursorMensagemInvalidoError,
   LimiteDiarioRegistrosError,
   ParticipacaoDuplicadaError,
   type AlteracaoDesafio,
@@ -45,7 +49,12 @@ const CRITERIOS_RANKING: CriterioRanking[] = [
 export interface DadosCriacaoDesafio {
   nome: string;
   inicio: string;
-  fim: string;
+  fim: string | null;
+  tipo?: 'desafio' | 'clube';
+  descricao?: string;
+  capaTema?: 'azul' | 'lima' | 'rio';
+  capaBase64?: string;
+  capaMimeType?: string;
   criteriosRanking?: CriterioRanking[];
 }
 
@@ -77,29 +86,73 @@ export class GerenciarPescariasService {
     private readonly agora: () => Date = () => new Date()
   ) {}
 
+  async listarMensagens(desafioId: string, pescadorId: string, antes?: string): Promise<PaginaMensagens> {
+    await this.obterDesafio(desafioId);
+    await this.exigirParticipante(desafioId, pescadorId);
+    if (antes && !/^[a-zA-Z0-9_-]{1,128}$/.test(antes)) throw new ErroPescaria('Cursor de mensagens inválido.', 400);
+    try { return await this.repository.listarMensagens(desafioId, antes); }
+    catch (error) { if (error instanceof CursorMensagemInvalidoError) throw new ErroPescaria(error.message, 400); throw error; }
+  }
+
+  async enviarMensagem(desafioId: string, pescadorId: string, nomePescador: string, dados: { texto?: string; fotoBase64?: string; fotoMimeType?: string }): Promise<MensagemGrupo> {
+    const desafio = await this.obterDesafio(desafioId);
+    await this.exigirParticipante(desafioId, pescadorId);
+    if (desafio.status === 'cancelado') throw new ErroPescaria('Este grupo foi encerrado.', 409);
+    const texto = dados.texto?.trim() ?? '';
+    if (texto.length > 2000 || (!texto && !dados.fotoBase64)) throw new ErroPescaria('Escreva uma mensagem de até 2000 caracteres ou envie uma foto.', 400);
+    if (Boolean(dados.fotoBase64) !== Boolean(dados.fotoMimeType)) throw new ErroPescaria('Informe a foto e seu tipo.', 400);
+    const foto = dados.fotoBase64 && dados.fotoMimeType ? this.validarFoto(dados.fotoBase64, dados.fotoMimeType) : null;
+    const mensagem: MensagemGrupo = { id: this.gerarId(), desafioId, pescadorId, nomePescador, texto, criadoEm: this.agora().toISOString() };
+    let fotoPath: string | undefined;
+    try {
+      if (foto) {
+        const salva = await this.fotoStorage.salvar(`grupos/${desafioId}/chat/${mensagem.id}`, foto.base64, foto.mimeType);
+        mensagem.fotoUrl = salva.url;
+        fotoPath = salva.path;
+      }
+      await this.repository.criarMensagem(mensagem);
+      return mensagem;
+    } catch (error) {
+      if (fotoPath) await this.tentarExcluirFoto(fotoPath);
+      throw error;
+    }
+  }
+
   async criarDesafio(
     pescadorId: string,
     dados: DadosCriacaoDesafio,
     nomePescador = pescadorId
   ): Promise<Desafio> {
     const nome = this.validarTexto(dados.nome, 'Nome do desafio', 80);
-    const inicio = this.validarData(dados.inicio, 'Data de início');
-    const fim = this.validarData(dados.fim, 'Data de fim');
     const agora = this.agora();
-    if (inicio <= agora || fim <= inicio) {
+    const tipo = dados.tipo ?? 'desafio';
+    if (!['desafio', 'clube'].includes(tipo)) throw new ErroPescaria('Tipo de grupo inválido.', 400);
+    const inicio = tipo === 'clube' ? agora : this.validarData(dados.inicio, 'Data de início');
+    const fim = tipo === 'clube' ? null : this.validarData(dados.fim ?? '', 'Data de fim');
+    if ((tipo === 'clube' && dados.fim !== null) || (tipo === 'desafio' && (inicio <= agora || !fim || fim <= inicio))) {
       throw new ErroPescaria(
         'O desafio deve começar no futuro e terminar depois do início.',
         400
       );
     }
 
-    const criterios = dados.criteriosRanking ?? CRITERIOS_RANKING;
+    const criterios = dados.criteriosRanking ?? (dados.tipo ? ['maior_peixe'] : CRITERIOS_RANKING);
     if (
       !criterios.length ||
       criterios.some((item) => !CRITERIOS_RANKING.includes(item))
     ) {
       throw new ErroPescaria('Critérios de ranking inválidos.', 400);
     }
+
+    if (dados.tipo && (criterios.length !== 1 || criterios[0] !== 'maior_peixe')) {
+      throw new ErroPescaria('O modo disponível para novos grupos é maior peixe pescado.', 400);
+    }
+    const descricao = dados.descricao?.trim() ?? '';
+    if (descricao.length > 500) throw new ErroPescaria('A descrição deve ter até 500 caracteres.', 400);
+    const capaTema = dados.capaTema ?? 'azul';
+    if (!['azul', 'lima', 'rio'].includes(capaTema)) throw new ErroPescaria('Tema de capa inválido.', 400);
+    if (Boolean(dados.capaBase64) !== Boolean(dados.capaMimeType)) throw new ErroPescaria('Informe a foto de capa e seu tipo.', 400);
+    const foto = dados.capaBase64 && dados.capaMimeType ? this.validarFoto(dados.capaBase64, dados.capaMimeType) : null;
 
     for (let tentativa = 0; tentativa < 5; tentativa += 1) {
       const desafio: NovoDesafio = {
@@ -108,8 +161,11 @@ export class GerenciarPescariasService {
         codigoConvite: this.gerarCodigo().toUpperCase(),
         donoId: pescadorId,
         inicio: inicio.toISOString(),
-        fim: fim.toISOString(),
-        status: 'aberto',
+        fim: fim?.toISOString() ?? null,
+        tipo,
+        descricao,
+        capaTema,
+        status: tipo === 'clube' ? 'ativo' : 'aberto',
         criteriosRanking: [...new Set(criterios)],
         criadoEm: agora.toISOString(),
       };
@@ -120,10 +176,17 @@ export class GerenciarPescariasService {
         nomePescador,
         entrouEm: agora.toISOString(),
       };
+      let capaPath: string | undefined;
       try {
+        if (foto) {
+          const capa = await this.fotoStorage.salvar(`grupos/${desafio.id}/capa`, foto.base64, foto.mimeType);
+          capaPath = capa.path;
+          desafio.capaUrl = capa.url;
+        }
         await this.repository.criarDesafio(desafio, participacaoDono);
         return desafio;
       } catch (error) {
+        if (capaPath) await this.tentarExcluirFoto(capaPath);
         if (!(error instanceof CodigoConviteDuplicadoError)) throw error;
       }
     }
@@ -156,15 +219,15 @@ export class GerenciarPescariasService {
     const porPescador = new Map(participantes.map((p) => [p.pescadorId, p]));
     const registrosValidos = registros.filter((r) => r.status === 'valido');
     const totais = new Map<string, ItemRanking>();
-    const primeirasCapturas = new Map<string, string>();
+      const primeirasCapturas = new Map<string, string>();
     for (const participante of participantes) {
       totais.set(participante.pescadorId, {
         pescadorId: participante.pescadorId,
         nomePescador: participante.nomePescador,
         quantidadePeixes: 0,
         pesoTotalKg: 0,
-        maiorPeixeKg: null,
-        tempoAtePrimeiraCapturaMs: null,
+          maiorPeixeKg: null,
+          tempoAtePrimeiraCapturaMs: null,
       });
     }
     for (const registro of registrosValidos) {
@@ -174,55 +237,71 @@ export class GerenciarPescariasService {
         total.pesoTotalKg = Number(
           (total.pesoTotalKg + registro.pesoKg).toFixed(3)
         );
-        total.maiorPeixeKg = Math.max(total.maiorPeixeKg ?? 0, registro.pesoKg);
-        const primeiraCaptura = primeirasCapturas.get(registro.pescadorId);
-        if (!primeiraCaptura || registro.dataHora < primeiraCaptura) {
-          primeirasCapturas.set(registro.pescadorId, registro.dataHora);
+          total.maiorPeixeKg = Math.max(
+            total.maiorPeixeKg ?? 0,
+            registro.pesoKg
+          );
+          const primeiraCaptura = primeirasCapturas.get(registro.pescadorId);
+          if (!primeiraCaptura || registro.dataHora < primeiraCaptura) {
+            primeirasCapturas.set(registro.pescadorId, registro.dataHora);
+          }
+      }
+    }
+      const inicioDesafioMs = Date.parse(status.inicio);
+      for (const [pescadorId, dataHora] of primeirasCapturas) {
+        const primeiraCapturaMs = Date.parse(dataHora);
+        const total = totais.get(pescadorId);
+        if (
+          total &&
+          Number.isFinite(inicioDesafioMs) &&
+          Number.isFinite(primeiraCapturaMs)
+        ) {
+          total.tempoAtePrimeiraCapturaMs = Math.max(
+            0,
+            primeiraCapturaMs - inicioDesafioMs
+          );
         }
       }
-    }
-    const inicioDesafioMs = Date.parse(status.inicio);
-    for (const [pescadorId, dataHora] of primeirasCapturas) {
-      const tempoCapturaMs = Date.parse(dataHora);
-      const total = totais.get(pescadorId);
-      if (
-        total &&
-        Number.isFinite(inicioDesafioMs) &&
-        Number.isFinite(tempoCapturaMs)
-      ) {
-        total.tempoAtePrimeiraCapturaMs = Math.max(
-          0,
-          tempoCapturaMs - inicioDesafioMs
-        );
-      }
-    }
-
-    // A classificação combinada usa critérios lexicográficos: cada critério
-    // só desempata quando o anterior é igual. Participantes sem capturas ficam
-    // atrás de quem já pescou quando quantidade e maior peixe empatam.
-    const ranking = [...totais.values()].sort((a, b) => {
+      const ranking = [...totais.values()].sort((a, b) => {
+        const compareCount = b.quantidadePeixes - a.quantidadePeixes;
+        if (compareCount !== 0) return compareCount;
+        const compareBiggest = (b.maiorPeixeKg ?? -1) - (a.maiorPeixeKg ?? -1);
+        if (compareBiggest !== 0) return compareBiggest;
+        const tempoA = a.tempoAtePrimeiraCapturaMs;
+        const tempoB = b.tempoAtePrimeiraCapturaMs;
+        if (tempoA !== null && tempoB === null) return -1;
+        if (tempoA === null && tempoB !== null) return 1;
+        if (tempoA !== null && tempoB !== null && tempoA !== tempoB) {
+          return tempoA - tempoB;
+        }
+        return a.pescadorId.localeCompare(b.pescadorId);
+      });
+    const rankingPesoTotal = [...totais.values()].sort((a, b) => {
+      const compareWeight = b.pesoTotalKg - a.pesoTotalKg;
       const compareCount = b.quantidadePeixes - a.quantidadePeixes;
-      if (compareCount !== 0) return compareCount;
-
-      const compareBiggestFish =
-        (b.maiorPeixeKg ?? -1) - (a.maiorPeixeKg ?? -1);
-      if (compareBiggestFish !== 0) return compareBiggestFish;
-
-      const tempoA = a.tempoAtePrimeiraCapturaMs;
-      const tempoB = b.tempoAtePrimeiraCapturaMs;
-      if (tempoA !== null && tempoB === null) return -1;
-      if (tempoA === null && tempoB !== null) return 1;
-      if (tempoA !== null && tempoB !== null && tempoA !== tempoB) {
-        return tempoA - tempoB;
+      if (
+        status.criteriosRanking.includes('menor_tempo') &&
+        compareWeight === 0 &&
+        compareCount === 0
+      ) {
+        const earliestA = registrosValidos
+          .filter((registro) => registro.pescadorId === a.pescadorId)
+          .map((registro) => registro.dataHora)
+          .sort()[0];
+        const earliestB = registrosValidos
+          .filter((registro) => registro.pescadorId === b.pescadorId)
+          .map((registro) => registro.dataHora)
+          .sort()[0];
+        if (earliestA && earliestB) {
+          return earliestA.localeCompare(earliestB);
+        }
       }
-      return a.pescadorId.localeCompare(b.pescadorId);
-    });
-    const rankingPesoTotal = [...totais.values()].sort(
-      (a, b) =>
-        b.pesoTotalKg - a.pesoTotalKg ||
-        b.quantidadePeixes - a.quantidadePeixes ||
+      return (
+        compareWeight ||
+        compareCount ||
         a.pescadorId.localeCompare(b.pescadorId)
-    );
+      );
+    });
     const melhorRegistro = [...registrosValidos].sort(
       (a, b) =>
         b.pesoKg - a.pesoKg ||
@@ -238,7 +317,22 @@ export class GerenciarPescariasService {
               melhorRegistro.pescadorId,
           }
         : null;
-    return { ...status, participantes, ranking, rankingPesoTotal, melhorPeixe };
+    const melhoresPorPescador = new Map<string, RegistroPesca>();
+    for (const registro of registrosValidos) {
+      const atual = melhoresPorPescador.get(registro.pescadorId);
+      if (!atual || registro.pesoKg > atual.pesoKg || (registro.pesoKg === atual.pesoKg && registro.dataHora < atual.dataHora)) {
+        melhoresPorPescador.set(registro.pescadorId, registro);
+      }
+    }
+    const rankingMaiorPeixe = status.criteriosRanking.includes('maior_peixe')
+      ? [...totais.values()].map(item => ({
+          ...item,
+          maiorPeixeKg: melhoresPorPescador.get(item.pescadorId)?.pesoKg ?? 0,
+        })).sort((a, b) => b.maiorPeixeKg - a.maiorPeixeKg
+          || (melhoresPorPescador.get(a.pescadorId)?.dataHora ?? '').localeCompare(melhoresPorPescador.get(b.pescadorId)?.dataHora ?? '')
+          || a.pescadorId.localeCompare(b.pescadorId))
+      : [];
+      return { ...status, participantes, ranking, rankingPesoTotal, rankingMaiorPeixe, melhorPeixe };
   }
 
   async atualizarDesafio(
@@ -258,7 +352,7 @@ export class GerenciarPescariasService {
       );
     }
     const inicio = this.validarData(dados.inicio, 'Data de início');
-    const fim = this.validarData(dados.fim, 'Data de fim');
+    const fim = this.validarData(dados.fim ?? '', 'Data de fim');
     if (inicio <= this.agora() || fim <= inicio) {
       throw new ErroPescaria(
         'O desafio deve começar no futuro e terminar depois do início.',
@@ -301,10 +395,11 @@ export class GerenciarPescariasService {
     );
     if (!desafio)
       throw new ErroPescaria('Código de convite não encontrado.', 404);
-    await this.atualizarStatus(desafio);
+    const atualizado = await this.atualizarStatus(desafio);
     if (
-      desafio.status !== 'aberto' ||
-      this.agora() >= new Date(desafio.inicio)
+      desafio.tipo === 'clube'
+        ? atualizado.status !== 'ativo'
+        : atualizado.status !== 'aberto' || this.agora() >= new Date(desafio.inicio)
     ) {
       throw new ErroPescaria(
         'Só é possível entrar em desafios abertos antes do início.',
@@ -343,8 +438,9 @@ export class GerenciarPescariasService {
   async sairDoDesafio(desafioId: string, pescadorId: string): Promise<void> {
     const desafio = await this.obterDesafio(desafioId);
     if (
-      desafio.status !== 'aberto' ||
-      this.agora() >= new Date(desafio.inicio)
+      desafio.tipo === 'clube'
+        ? desafio.status !== 'ativo'
+        : desafio.status !== 'aberto' || this.agora() >= new Date(desafio.inicio)
     ) {
       throw new ErroPescaria(
         'Só é possível sair antes do desafio começar.',
@@ -558,10 +654,11 @@ export class GerenciarPescariasService {
   private async atualizarStatus(desafio: Desafio): Promise<Desafio> {
     if (desafio.status === 'cancelado' || desafio.status === 'encerrado')
       return desafio;
+    if (desafio.tipo === 'clube') return desafio;
     const participantes = await this.repository.listarParticipacoes(desafio.id);
     const agora = this.agora();
     let status: Desafio['status'] = desafio.status;
-    if (agora >= new Date(desafio.fim)) status = 'encerrado';
+    if (desafio.fim && agora >= new Date(desafio.fim)) status = 'encerrado';
     else if (agora >= new Date(desafio.inicio)) {
       status = participantes.length >= 2 ? 'ativo' : 'cancelado';
     }
@@ -586,7 +683,7 @@ export class GerenciarPescariasService {
   }
 
   private async obterEspecieAtiva(id: string): Promise<Especie> {
-    const especie = await this.repository.buscarEspecie(id);
+    const especie = CATALOGO_ESPECIES.find(item => item.id === id) ?? await this.repository.buscarEspecie(id);
     if (!especie) throw new ErroPescaria('Espécie não encontrada.', 404);
     if (!especie.ativa) throw new ErroPescaria('A espécie está inativa.', 409);
     return especie;
@@ -627,7 +724,7 @@ export class GerenciarPescariasService {
     if (
       desafio.status !== 'ativo' ||
       this.agora() < new Date(desafio.inicio) ||
-      this.agora() >= new Date(desafio.fim)
+      (desafio.fim !== null && this.agora() >= new Date(desafio.fim))
     ) {
       throw new ErroPescaria(
         'O registro só pode ser alterado durante um desafio ativo.',
@@ -637,7 +734,7 @@ export class GerenciarPescariasService {
   }
 
   private validarDataNoDesafio(data: Date, desafio: Desafio): void {
-    if (data < new Date(desafio.inicio) || data > new Date(desafio.fim)) {
+    if (data < new Date(desafio.inicio) || (desafio.fim !== null && data > new Date(desafio.fim))) {
       throw new ErroPescaria(
         'A data da captura deve estar dentro do período do desafio.',
         400

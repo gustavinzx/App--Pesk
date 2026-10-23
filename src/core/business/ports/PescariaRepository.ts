@@ -3,16 +3,18 @@ import type {
   Especie,
   Participacao,
   RegistroPesca,
+  MensagemGrupo,
+  PaginaMensagens,
 } from '../../domain/Pescaria';
 
 export interface NovoDesafio extends Omit<Desafio, 'status'> {
-  status: 'aberto';
+  status: 'aberto' | 'ativo';
 }
 
 export interface AlteracaoDesafio {
   nome: string;
   inicio: string;
-  fim: string;
+  fim: string | null;
   criteriosRanking: Desafio['criteriosRanking'];
 }
 
@@ -37,6 +39,8 @@ export interface AlteracaoRegistroPesca {
 }
 
 export interface PescariaRepository {
+  criarMensagem(mensagem: MensagemGrupo): Promise<void>;
+  listarMensagens(desafioId: string, antes?: string): Promise<PaginaMensagens>;
   criarDesafio(
     desafio: NovoDesafio,
     participacaoDono: Participacao
@@ -101,6 +105,10 @@ export class CodigoConviteDuplicadoError extends Error {
     super('Código de convite já utilizado.');
     this.name = 'CodigoConviteDuplicadoError';
   }
+}
+
+export class CursorMensagemInvalidoError extends Error {
+  constructor() { super('Mensagem de referência não encontrada neste grupo.'); this.name = 'CursorMensagemInvalidoError'; }
 }
 export class ParticipacaoDuplicadaError extends Error {
   constructor() {

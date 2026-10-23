@@ -45,11 +45,13 @@ export class UsuarioRepositoryFirestore implements PerfilUsuarioRepository {
         return null;
       }
       transaction.update(ref, {
+        ...dados,
         nome: dados.nome,
         atualizadoEm: Timestamp.fromDate(new Date(dados.atualizadoEm)),
       });
       return this.mapearUsuario(snapshot.id, {
         ...snapshot.data(),
+        ...dados,
         nome: dados.nome,
         atualizadoEm: Timestamp.fromDate(new Date(dados.atualizadoEm)),
       });
@@ -72,6 +74,8 @@ export class UsuarioRepositoryFirestore implements PerfilUsuarioRepository {
     return {
       id,
       nome: String(data.nome ?? ''),
+      descricao: String(data.descricao ?? ''),
+      fotoUrl: String(data.fotoUrl ?? ''),
       email: String(data.email ?? ''),
       criadoEm: this.toISOString(data.criadoEm),
       ...(data.atualizadoEm

@@ -20,7 +20,11 @@ export interface DesafioDto {
   nome: string;
   codigoConvite: string;
   inicio: string;
-  fim: string;
+  fim: string | null;
+  tipo?: 'desafio' | 'clube';
+  descricao?: string;
+  capaTema?: 'azul' | 'lima' | 'rio';
+  capaUrl?: string;
   status: 'aberto' | 'ativo' | 'encerrado' | 'cancelado';
   donoId: string;
 }
@@ -54,6 +58,7 @@ export interface RegistroDto {
 }
 
 export interface DesafioDetalheDto extends DesafioDto {
+  rankingMaiorPeixe?: { pescadorId: string; nomePescador: string; quantidadePeixes: number; pesoTotalKg: number; maiorPeixeKg: number }[];
   participantes: ParticipacaoDto[];
   ranking: {
     pescadorId: string;
@@ -68,13 +73,38 @@ export interface DesafioDetalheDto extends DesafioDto {
     nomePescador: string;
     quantidadePeixes: number;
     pesoTotalKg: number;
-    maiorPeixeKg: number | null;
-    tempoAtePrimeiraCapturaMs: number | null;
+    maiorPeixeKg?: number | null;
+    tempoAtePrimeiraCapturaMs?: number | null;
   }[];
   melhorPeixe: (RegistroDto & { nomePescador: string }) | null;
 }
 
+export interface MensagemGrupoDto {
+  id: string;
+  desafioId: string;
+  pescadorId: string;
+  nomePescador: string;
+  texto: string;
+  fotoUrl?: string;
+  criadoEm: string;
+}
+
+export interface PaginaMensagensDto { mensagens: MensagemGrupoDto[]; proximoCursor: string | null }
+
+export interface PerfilDto { id: string; nome: string; descricao?: string; fotoUrl?: string }
+
 export class PeskApiClient {
+  async perfil(): Promise<PerfilDto> { return this.request('/api/usuarios/me'); }
+  async salvarPerfil(dados: { nome: string; descricao: string; fotoBase64?: string; fotoMimeType?: string }): Promise<PerfilDto> { return this.request('/api/usuarios/me', { method: 'PATCH', body: JSON.stringify(dados) }); }
+  async listarMensagens(id: string, antes?: string): Promise<PaginaMensagensDto> {
+    return this.request(`/api/desafios/${encodeURIComponent(id)}/mensagens${antes ? '?antes=' + encodeURIComponent(antes) : ''}`);
+  }
+  async enviarMensagem(id: string, dados: { texto: string; fotoBase64?: string; fotoMimeType?: string }): Promise<MensagemGrupoDto> {
+    return this.request(`/api/desafios/${encodeURIComponent(id)}/mensagens`, { method: 'POST', body: JSON.stringify(dados) });
+  }
+  async sairGrupo(id: string): Promise<void> {
+    return this.request(`/api/desafios/${encodeURIComponent(id)}/participantes/me`, { method: 'DELETE' });
+  }
   private async request<T>(
     path: string,
     options: RequestInit = {}
@@ -167,6 +197,20 @@ export class PeskApiClient {
       method: 'POST',
       body: JSON.stringify(input),
     });
+  }
+
+  async criarGrupo(input: {
+    nome: string;
+    descricao: string;
+    tipo: 'desafio' | 'clube';
+    inicio: string;
+    fim: string | null;
+    capaTema: 'azul' | 'lima' | 'rio';
+    capaBase64?: string;
+    capaMimeType?: string;
+    criteriosRanking: ['maior_peixe'];
+  }): Promise<DesafioDto> {
+    return this.request('/api/desafios', { method: 'POST', body: JSON.stringify(input) });
   }
 
   async entrarDesafio(codigoConvite: string): Promise<void> {
