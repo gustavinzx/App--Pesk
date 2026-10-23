@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { auth } from '../../backend/config/firebase';
+import { auth } from '../config/firebase';
 import { useSession } from '../context/SessionContext';
 import { PeskApiClient } from '../services/PeskApiClient';
 

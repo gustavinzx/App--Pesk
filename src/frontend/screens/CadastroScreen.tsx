@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { useState } from 'react';
 import { Pressable } from 'react-native';
-import { auth } from '../../backend/config/firebase';
+import { auth } from '../config/firebase';
 import { type CadastrarUsuarioService } from '../../core/business/CadastrarUsuarioService';
 import { AuthButton, AuthFeedback, AuthInput, AuthShell, authStyles } from '../components/AuthUI';
 import { useSession } from '../context/SessionContext';

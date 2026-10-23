@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Image, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { updateProfile } from 'firebase/auth';
-import { auth } from '../backend/config/firebase';
+import { auth } from '../frontend/config/firebase';
 import AuthGate from '../frontend/components/AuthGate';
 import { ActionButton, Feedback, Input, Screen, styles } from '../frontend/components/PeskUI';
 import { Text } from '../frontend/components/Typography';

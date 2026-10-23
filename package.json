@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@types/jest": "29.5.14",
+    "@types/node": "^26.6.5",
     "@types/react": "~19.3.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~58.0.4",
@@ -40,7 +41,9 @@
     "test:backend": "npm --prefix src/backend test",
     "typecheck:backend": "npm --prefix src/backend run typecheck",
     "build:backend": "npm --prefix src/backend run build",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test:arquitetura": "jest --runInBand __tests__/Arquitetura.test.ts",
+    "test:tudo": "jest --runInBand && npm run test:backend"
   },
   "expo": {
     "install": {

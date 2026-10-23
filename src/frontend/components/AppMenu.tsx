@@ -9,7 +9,7 @@ import { createContext, type ReactNode, useContext, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useGroupDirectory } from '../context/GroupDirectoryContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth } from '../../backend/config/firebase';
+import { auth } from '../config/firebase';
 import { useOperation, useUsuario } from '../hooks/usePesk';
 
 const MenuContext = createContext<(() => void) | null>(null);
